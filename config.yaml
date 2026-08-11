@@ -3,70 +3,61 @@
 # ============================================================
 
 # --- Retrieval Backend ---
-# "milvus"  : dùng Milvus Lite (khuyến nghị — nhanh hơn, lưu video_id/frame_id trực tiếp)
-# "faiss"   : dùng FAISS + frame_map.json (fallback)
 retrieval_backend: "milvus"
 
 # --- Paths ---
 data:
-  root: "./Dataset"              # thư mục gốc dataset
-  videos_dir: "Videos"                # Videos/L01_V001.mp4 ...
-  keyframes_dir: "Keyframes"          # Keyframes/L01_V001/0000.jpg ...
-  objects_dir: "Objects"              # Objects/L01_V001/0000.json ...
-  metadata_dir: "Metadata"            # Metadata/L01_V001.json ...
-  clip_features_npy: "clip_features.npy"  # single .npy (dùng khi backend=faiss)
+  root: "./DATASET"
+  videos_dir: "Videos"
+  keyframes_dir: "Keyframes"
+  objects_dir: "Objects"
+  metadata_dir: "Metadata"
+  clip_features_npy: "clip_features.npy"
 
-  # Per-video .npy directories (dùng khi backend=milvus)
-  # Thư mục .npy (flat — tất cả .npy nằm trong 1 thư mục duy nhất)
   npy_dirs:
-    - "./Dataset/clip-features-32"
+    - "./clip-features-32-aic25-b1/clip-features-32"
+    
+  # Trỏ vào thư mục chứa trực tiếp video folders (L21_V001, L21_V002...)
+  keyframes_dirs_list:
+    - "./DATASET/Keyframes_L21/keyframes"
+    - "./DATASET/Keyframes_L22/keyframes"
+    - "./DATASET/Keyframes_L23/keyframes"
 
-  # Thư mục chứa Keyframes
-  # TextualKISSearcher sẽ tự tìm ảnh trong cấu trúc này
-  keyframes_root: "./Dataset/keyframes"
+  keyframes_root: "./DATASET"
 
 index:
-  # --- Milvus Lite (sử dụng DB từ AIC2026) ---
-  milvus_db_path: "./Dataset/aic_kis_database.db"
-  milvus_collection: "kis_keyframes"
+  # Milvus Lite Config
+  milvus_db_path: "aic_kis_database_siglip.db"
+  milvus_collection: "kis_keyframes_siglip"
 
-  # --- FAISS (fallback) ---
+  # FAISS (fallback)
   faiss_index_path: "./indexes/clip_faiss.index"
   frame_map_path:   "./indexes/frame_map.json"
   bm25_corpus_path: "./indexes/bm25_corpus.json"
 
 # --- CLIP Model ---
 clip:
-  model_name: "ViT-B/32"   # phải khớp với model đã dùng để tạo clip_features.npy
-  device: "cuda"            # "cuda" hoặc "cpu"
+  model_name: "ViT-B/32"
+  device: "cuda"
 
 # --- Retrieval ---
 retrieval:
-  top_k_clip: 500           # số frame lấy từ CLIP search
-  top_k_bm25: 200           # số frame lấy từ BM25 search (không dùng cho KIS nữa)
-  top_k_object: 200         # số frame lấy từ object search
-  final_top_k: 100          # số câu trả lời nộp cho mỗi query
+  top_k_clip: 500
+  top_k_bm25: 200
+  top_k_object: 200
+  final_top_k: 100
   clip_weight: 0.7
   bm25_weight: 0.3
 
-# --- DINO Re-ranking (cho Textual KIS) ---
-dino:
-  model_name: "IDEA-Research/grounding-dino-base"
-  top_k_coarse: 30          # số frame CLIP lấy ra để DINO chấm điểm (giống AIC2026)
-  alpha_clip: 0.75          # trọng số CLIP (DINO = 1 - alpha)
-  threshold: 0.05           # ngưỡng detect tối thiểu của DINO
-
-# --- VQA (Q&A queries) ---
+# --- VQA ---
 vqa:
-  model: "Salesforce/blip2-opt-2.7b"   # VQA model (BLIP-2)
-  # alternatives: "llava-hf/llava-1.5-7b-hf", "Qwen/Qwen2-VL-7B-Instruct"
+  model: "Salesforce/blip2-opt-2.7b"
   device: "cuda"
-  top_k_frames: 5           # số frame top để chạy VQA
+  top_k_frames: 5
 
-# --- TRAKE (temporal queries) ---
+# --- TRAKE ---
 trake:
-  top_k_per_event: 300      # candidates per sub-event
-  # dp algorithm cho monotone chain
+  top_k_per_event: 300
 
 # --- Submission ---
 submission:
