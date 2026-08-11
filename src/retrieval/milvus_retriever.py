@@ -132,53 +132,51 @@ class MilvusRetriever:
 
     def _load_model(self):
         """
-        Lazy-load CLIP model (chỉ load 1 lần, giữ trong memory).
-        Tránh việc load lại mỗi lần search như code gốc.
+        Lazy-load CLIP/SigLIP model.
         """
         if self._model is not None:
             return
 
-        print(f"[MilvusRetriever] Đang tải CLIP Text Encoder: {self.model_name}")
+        print(f"[MilvusRetriever] Đang tải Text Encoder: {self.model_name}")
 
-        try:
-            # Dùng openai/clip (giống code gốc của user)
-            import clip
-            self._model, _ = clip.load(self.model_name, device=self.device)
+        if "siglip" in self.model_name.lower():
+            from transformers import AutoModel, AutoProcessor
+            self._model = AutoModel.from_pretrained(self.model_name).to(self.device)
             self._model.eval()
-            self._tokenize = clip.tokenize
-            print(f"[MilvusRetriever] CLIP loaded (openai/clip) | device={self.device}")
-
-        except ImportError:
-            # Fallback: open_clip nếu không có openai/clip
-            import open_clip
-            print(f"[MilvusRetriever] Fallback: open_clip | model={self.model_name}")
-            model, _, _ = open_clip.create_model_and_transforms(
-                "ViT-B-32", pretrained="openai", device=self.device
-            )
-            self._model = model.eval()
-            self._tokenize = open_clip.get_tokenizer("ViT-B-32")
+            self._tokenize = AutoProcessor.from_pretrained(self.model_name)
+            print(f"[MilvusRetriever] SigLIP loaded (HF) | device={self.device}")
+        else:
+            try:
+                import clip
+                self._model, _ = clip.load(self.model_name, device=self.device)
+                self._model.eval()
+                self._tokenize = clip.tokenize
+                print(f"[MilvusRetriever] CLIP loaded (openai/clip) | device={self.device}")
+            except ImportError:
+                import open_clip
+                print(f"[MilvusRetriever] Fallback: open_clip | model={self.model_name}")
+                model, _, _ = open_clip.create_model_and_transforms(
+                    "ViT-B-32", pretrained="openai", device=self.device
+                )
+                self._model = model.eval()
+                self._tokenize = open_clip.get_tokenizer("ViT-B-32")
 
     def encode_text(self, query: str) -> np.ndarray:
         """
-        Encode query text → CLIP embedding, L2-normalized.
-        (Logic giống hệt code gốc của user, nhưng không reload model mỗi lần)
-
-        Args:
-            query: chuỗi văn bản mô tả cần tìm (hỗ trợ truncate tự động)
-
-        Returns:
-            np.ndarray shape (512,), dtype=float32, đã L2-normalize
+        Encode query text → embedding, L2-normalized.
         """
         self._load_model()
 
         with torch.no_grad():
-            # truncate=True để tránh lỗi khi query quá dài (>77 tokens)
-            text_inputs = self._tokenize([query], truncate=True).to(self.device)
-            text_features = self._model.encode_text(text_inputs)
+            if "siglip" in self.model_name.lower():
+                inputs = self._tokenize(text=[query], padding="max_length", return_tensors="pt").to(self.device)
+                text_features = self._model.get_text_features(**inputs)
+            else:
+                text_inputs = self._tokenize([query], truncate=True).to(self.device)
+                text_features = self._model.encode_text(text_inputs)
 
-            # L2-normalize (giống code gốc: text_features /= norm)
+            # L2-normalize
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-
             text_vector = text_features[0].cpu().numpy().astype(np.float32)
 
         return text_vector

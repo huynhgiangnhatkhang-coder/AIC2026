@@ -37,7 +37,7 @@ index:
 
 # --- CLIP Model ---
 clip:
-  model_name: "ViT-B/32"
+  model_name: "google/siglip-base-patch16-224"
   device: "cuda"
 
 # --- Retrieval ---

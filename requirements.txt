@@ -55,3 +55,8 @@ sacremoses       # cần cho MarianTokenizer (Marian MT)
 # ── Optional: LLM Query Expansion ───────────────────────────
 # openai        # for GPT-based query expansion
 # google-generativeai  # for Gemini
+
+# ── New Dependencies for KIS (SigLIP + Florence-2 + Milvus) ──
+pymilvus>=2.4.0
+einops
+timm

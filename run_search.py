@@ -5,10 +5,10 @@ Chạy search từ command line.
 
 Usage:
     # Chạy single query (Bây giờ sẽ tự động dùng SigLIP + Florence-2 + OCR)
-    python run_search.py --query "tai nạn giao thông tại Đắk Lắk" --type kis --show-images --show-k 10
+    python run_search.py --query "cặp khỉ sinh đôi, khỉ, sinh đôi" --type kis --show-images --show-k 10
 
     # Chạy từ file JSON
-    python run_search.py --query-file queries.json --output submissions/
+    # python run_search.py --query-file queries.json --output submissions/
 
     # Q&A
     python run_search.py --query "cảnh bữa tiệc" --question "Váy của cô gái màu gì?" --type qa
@@ -504,7 +504,11 @@ def run_single_query(components: dict, args, cfg: dict):
 
 def run_batch_queries(components: dict, args, cfg: dict):
     with open(args.query_file, "r", encoding="utf-8") as f:
-        queries = json.load(f)
+        data = json.load(f)
+        if isinstance(data, dict) and "queries" in data:
+            queries = data["queries"]
+        else:
+            queries = data
 
     manager = SubmissionManager(
         output_dir=args.output or cfg["submission"]["output_dir"],
