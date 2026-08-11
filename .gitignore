@@ -25,3 +25,8 @@ venv.bak/
 .vscode/
 .idea/
 *.swp
+
+# Old datasets/DBs from main
+aic_kis_database.db/
+aic_kis_database_siglip.db/
+clip-features-32-aic25-b1/
