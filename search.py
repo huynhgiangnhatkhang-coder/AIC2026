@@ -52,7 +52,7 @@ if __name__ == "__main__":
         milvus_client.load_collection(COLLECTION_NAME) 
         
         # Nhập câu truy vấn của bạn tại đây
-        query_text = "Night scene outdoors on a road with cargo container trucks, multiple police officers and security personnel in reflective safety vests standing and inspecting"
+        query_text = "Duck, people, grass, field, water"
         
         search_kis(milvus_client, query_text, top_k=5)
     except Exception as e:
