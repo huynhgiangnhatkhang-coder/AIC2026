@@ -1,4 +1,5 @@
 import os
+import json
 import torch
 from PIL import Image
 from pymilvus import MilvusClient
@@ -7,11 +8,21 @@ from translate import analyze_query_offline_mt
 from tqdm import tqdm
 
 # ==========================================
-# 1. CẤU HÌNH THÔNG SỐ
+# 1. CẤU HÌNH THÔNG SỐ & DATA OCR
 # ==========================================    
 KEYFRAMES_DIR = "DATASET"
 MILVUS_DB_PATH = "aic_kis_database_siglip.db"
 COLLECTION_NAME = "kis_keyframes_siglip"
+OCR_DB_PATH = "ocr_database.json"
+
+# Tải dữ liệu OCR vào bộ nhớ
+OCR_DATA = {}
+if os.path.exists(OCR_DB_PATH):
+    with open(OCR_DB_PATH, "r", encoding="utf-8") as f:
+        OCR_DATA = json.load(f)
+    print(f"✅ Đã tải {len(OCR_DATA)} bản ghi OCR vào bộ nhớ!")
+else:
+    print(f"⚠️ Không tìm thấy file {OCR_DB_PATH}. Tính năng OCR sẽ bị bỏ qua (0 điểm).")
 
 # ==========================================
 # 2. KHỞI TẠO MÔ HÌNH (SIGLIP & FLORENCE-2)
@@ -36,67 +47,112 @@ florence_model = AutoModelForCausalLM.from_pretrained(
 florence_model.eval()
 
 # ==========================================
-# 3. HÀM KIỂM TRA BẰNG FLORENCE-2
+# 3. CÁC HÀM CHẤM ĐIỂM (FLORENCE & OCR)
 # ==========================================
-def get_florence_score(image_path, required_objects):
+def get_florence_scores_batch(image_paths, required_objects, batch_size=8):
     """
-    Yêu cầu Florence-2 tìm các vật thể và chấm điểm dựa trên tỷ lệ tìm thấy.
+    Xử lý song song nhiều ảnh cùng lúc bằng Florence-2 để tăng tốc độ.
     """
-    if not required_objects:
-        return 1.0
+    if not required_objects or not image_paths:
+        return [1.0] * len(image_paths) if not required_objects else [0.0] * len(image_paths)
         
-    # Ghép các vật thể thành một cụm văn bản
     text_input = " and ".join(required_objects)
-    
-    # Task Grounding: Yêu cầu mô hình gắn tọa độ cho các từ khóa
     prompt = f"<CAPTION_TO_PHRASE_GROUNDING> {text_input}"
     
-    try:
-        image = Image.open(image_path).convert("RGB")
-        inputs = florence_processor(text=prompt, images=image, return_tensors="pt").to(device)
+    all_scores = []
+    
+    # Chia nhỏ danh sách ảnh thành các batch
+    for i in tqdm(range(0, len(image_paths), batch_size), desc="[Florence-2] Batch Re-ranking", unit="batch"):
+        batch_paths = image_paths[i:i+batch_size]
         
-        with torch.no_grad():
-            generated_ids = florence_model.generate(
-                input_ids=inputs["input_ids"],
-                pixel_values=inputs["pixel_values"],
-                max_new_tokens=1024,
-                num_beams=3
-            )
+        images = []
+        valid_indices = []
+        
+        # Load các ảnh trong batch
+        for idx, path in enumerate(batch_paths):
+            try:
+                img = Image.open(path).convert("RGB")
+                images.append(img)
+                valid_indices.append(idx)
+            except Exception as e:
+                print(f"Lỗi đọc ảnh tại {path}: {e}")
+                
+        if not images:
+            all_scores.extend([0.0] * len(batch_paths))
+            continue
             
-        generated_text = florence_processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-        parsed_answer = florence_processor.post_process_generation(
-            generated_text, 
-            task="<CAPTION_TO_PHRASE_GROUNDING>", 
-            image_size=(image.width, image.height)
-        )
+        prompts = [prompt] * len(images)
         
-        # Lấy danh sách các vật thể mà Florence-2 thực sự tìm thấy trong ảnh
-        results = parsed_answer.get('<CAPTION_TO_PHRASE_GROUNDING>', {})
-        labels_found = results.get('labels', [])
-        
-        if not labels_found:
-            return 0.0
+        try:
+            # Đẩy nguyên 1 batch vào GPU
+            inputs = florence_processor(text=prompts, images=images, return_tensors="pt", padding=True).to(device)
             
-        # Tính điểm dựa trên số lượng từ khóa được tìm thấy
-        unique_labels_found = set(labels_found)
-        score = len(unique_labels_found) / len(required_objects)
-        
-        return min(score, 1.0) # Đảm bảo điểm tối đa không vượt quá 1.0
-        
-    except Exception as e:
-        print(f"Lỗi Florence-2 đọc ảnh tại {image_path}: {e}")
+            with torch.no_grad():
+                generated_ids = florence_model.generate(
+                    input_ids=inputs["input_ids"],
+                    pixel_values=inputs["pixel_values"],
+                    max_new_tokens=1024,
+                    num_beams=3
+                )
+                
+            generated_texts = florence_processor.batch_decode(generated_ids, skip_special_tokens=False)
+            
+            batch_scores = [0.0] * len(batch_paths)
+            
+            # Tính điểm cho từng ảnh trong batch
+            for j, (gen_text, img) in enumerate(zip(generated_texts, images)):
+                parsed_answer = florence_processor.post_process_generation(
+                    gen_text, 
+                    task="<CAPTION_TO_PHRASE_GROUNDING>", 
+                    image_size=(img.width, img.height)
+                )
+                
+                results = parsed_answer.get('<CAPTION_TO_PHRASE_GROUNDING>', {})
+                labels_found = results.get('labels', [])
+                
+                if labels_found:
+                    unique_labels_found = set(labels_found)
+                    score = len(unique_labels_found) / len(required_objects)
+                    batch_scores[valid_indices[j]] = min(score, 1.0)
+                    
+            all_scores.extend(batch_scores)
+            
+        except Exception as e:
+            print(f"Lỗi Batch inference Florence-2: {e}")
+            all_scores.extend([0.0] * len(batch_paths))
+            
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
+    return all_scores
+
+def get_ocr_score(image_rel_path, search_text):
+    # (GIỮ NGUYÊN CODE CỦA HÀM NÀY NHƯ CŨ)
+    if not search_text or not OCR_DATA:
         return 0.0
+    image_rel_path = image_rel_path.replace("\\", "/") 
+    ocr_text = ""
+    for key, val in OCR_DATA.items():
+        if image_rel_path.endswith(key.replace("\\", "/")):
+            ocr_text = val
+            break
+    if not ocr_text:
+        return 0.0
+    search_keywords = search_text.lower().split()
+    if not search_keywords:
+        return 0.0
+    matched = sum(1 for kw in search_keywords if kw in ocr_text)
+    return matched / len(search_keywords)
 
 # ==========================================
-# 4. HÀM TÌM KIẾM VÀ RE-RANK KẾT HỢP (SIGLIP + FLORENCE-2)
+# 4. HÀM TÌM KIẾM VÀ RE-RANK KẾT HỢP
 # ==========================================
-def search_kis_with_florence(client, parsed_query_data, top_k=5, alpha=0.7):
+def search_kis_with_florence(client, parsed_query_data, top_k=5):
     clip_query = parsed_query_data["clip_query"]
     required_objects = parsed_query_data["required_objects"]
     
     print(f"\n[SigLIP] Đang mã hóa câu truy vấn: '{clip_query}'")
     
-    # Mã hóa văn bản bằng SigLIP
     text_inputs = siglip_processor(
         text=[clip_query], 
         padding="max_length", 
@@ -108,30 +164,22 @@ def search_kis_with_florence(client, parsed_query_data, top_k=5, alpha=0.7):
         text_features = text_features / text_features.norm(p=2, dim=-1, keepdim=True)
         text_vector = text_features[0].cpu().tolist()
 
-    # BƯỚC 1: LỌC THÔ BẰNG SIGLIP (Top 50)
     print("[Milvus] Đang truy xuất Top 50 khung hình gần giống nhất...") 
     search_results = client.search(
         collection_name=COLLECTION_NAME,
         data=[text_vector],
         limit=50, 
-        output_fields=["video_id", "frame_id"], # Đã sửa lỗi chính tả ở đây
+        output_fields=["video_id", "frame_id"], 
         search_params={"metric_type": "IP"}
     )
 
-    all_hits = []
-    for hits in search_results:
-        for hit in hits:
-            all_hits.append(hit)
-            
-    # BƯỚC 2: CHẤM ĐIỂM KẾT HỢP (ENSEMBLE SCORING)
-    print(f"[Florence-2 & Re-rank] Đang quét và chấm điểm hỗn hợp cho: {required_objects}...")
-
-    scored_results = []
+    # 1. Tìm toàn bộ đường dẫn ảnh hợp lệ trước
+    valid_hits = []
+    valid_image_paths = []
     
-    for hit in tqdm(all_hits, desc="Tiến độ xử lý", unit="ảnh"):
+    for hit in search_results[0]:
         v_id = hit["entity"]["video_id"]
         f_id = hit["entity"]["frame_id"]
-        clip_score = hit["distance"] # Điểm Similarity của SigLIP
         
         video_folder = v_id.replace(".mp4", "")
         batch_prefix = video_folder.split("_")[0]  
@@ -149,26 +197,36 @@ def search_kis_with_florence(client, parsed_query_data, top_k=5, alpha=0.7):
             if os.path.exists(temp_path):
                 image_path = temp_path
                 break
-        
-        if not image_path:
-            continue
-            
-        # Lấy điểm Florence-2 score
-        florence_score = get_florence_score(image_path, required_objects)
+                
+        if image_path:
+            valid_hits.append(hit)
+            valid_image_paths.append(image_path)
 
-        # Điểm tổng hợp = alpha * điểm_SigLIP + (1 - alpha) * điểm_Florence
-        final_score = alpha * clip_score + (1 - alpha) * florence_score
+    # 2. Re-rank đồng loạt bằng Florence-2 (Batch Size = 8)
+    print(f"[Tiến trình] Đang chấm điểm {len(valid_image_paths)} ảnh. Từ khóa: {required_objects}...")
+    
+    # BẠN CÓ THỂ CHỈNH BATCH_SIZE TẠI ĐÂY (4, 8, 16) tùy vào VRAM GPU
+    florence_scores = get_florence_scores_batch(valid_image_paths, required_objects, batch_size=8)
+    
+    # 3. Tổng hợp điểm (SigLIP + Florence + OCR)
+    scored_results = []
+    for hit, image_path, florence_score in zip(valid_hits, valid_image_paths, florence_scores):
+        clip_score = hit["distance"]
         
-        # Lưu lại thông tin để sort
+        rel_image_path = os.path.relpath(image_path, KEYFRAMES_DIR)
+        ocr_score = get_ocr_score(rel_image_path, clip_query)
+
+        final_score = (0.6 * clip_score) + (0.3 * florence_score) + (0.1 * ocr_score)
+        if ocr_score > 0.5:
+            final_score += 0.2
+            
         scored_results.append({
             "hit": hit,
             "clip_score": clip_score,
             "florence_score": florence_score,
+            "ocr_score": ocr_score,
             "final_score": final_score
         })
-        
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
     # Sắp xếp lại theo điểm tổng hợp từ cao xuống thấp
     scored_results = sorted(scored_results, key=lambda x: x["final_score"], reverse=True)
@@ -181,7 +239,8 @@ def search_kis_with_florence(client, parsed_query_data, top_k=5, alpha=0.7):
             hit = item["hit"]
             v_id = hit["entity"]["video_id"]
             f_id = hit["entity"]["frame_id"]
-            print(f"video_id = {v_id}, frame_id = {f_id} | Điểm tổng: {item['final_score']:.4f} (SigLIP: {item['clip_score']:.4f}, Florence: {item['florence_score']:.4f})")
+            print(f"▶ video_id = {v_id}, frame_id = {f_id} | Tổng điểm: {item['final_score']:.4f} "
+                  f"(SigLIP: {item['clip_score']:.4f} | Florence: {item['florence_score']:.4f} | OCR: {item['ocr_score']:.4f})")
 
 # ==========================================
 # 5. CHẠY CHÍNH
@@ -192,11 +251,11 @@ if __name__ == "__main__":
         milvus_client = MilvusClient(MILVUS_DB_PATH)
         milvus_client.load_collection(COLLECTION_NAME) 
         
-        raw_query = input("M kiếm gì?\nT kiếm: ")
+        raw_query = input("\nM kiếm gì?\nT kiếm: ")
         parsed_query_data = analyze_query_offline_mt(raw_query)
         
-        # Chạy tìm kiếm với alpha = 0.7 (70% ưu tiên SigLIP, 30% Florence-2 điều chỉnh)
-        search_kis_with_florence(milvus_client, parsed_query_data, top_k=5, alpha=0.7)
+        # Chạy tìm kiếm, in ra top 5
+        search_kis_with_florence(milvus_client, parsed_query_data, top_k=5)
         
     except Exception as e:
         print(f"Lỗi! Chi tiết: {e}")
