@@ -1,103 +1,133 @@
 import os
 import torch
-import clip 
 from PIL import Image
 from pymilvus import MilvusClient
-from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
-from translate import analyze_query_offline_mt 
+from transformers import AutoProcessor, AutoModelForCausalLM, AutoModel
+from translate import analyze_query_offline_mt
+from tqdm import tqdm
 
 # ==========================================
-# 1. CẤU HÌNH THÔNG SỐ (Giữ nguyên)
-# ==========================================
-MILVUS_DB_PATH = "aic_kis_database.db"
-COLLECTION_NAME = "kis_keyframes"
-
-# ĐƯỜNG DẪN TỚI THƯ MỤC CHỨA ẢNH GỐC (Trỏ thẳng vào thư mục DATASET của bạn)
+# 1. CẤU HÌNH THÔNG SỐ
+# ==========================================    
 KEYFRAMES_DIR = "DATASET"
+MILVUS_DB_PATH = "aic_kis_database_siglip.db"
+COLLECTION_NAME = "kis_keyframes_siglip"
 
 # ==========================================
-# 2. KHỞI TẠO MÔ HÌNH (Giữ nguyên)
+# 2. KHỞI TẠO MÔ HÌNH (SIGLIP & FLORENCE-2)
 # ==========================================
-print("Đang tải các mô hình AI lên bộ nhớ (CLIP & Grounding DINO)...")
+print("Đang tải các mô hình AI lên bộ nhớ (SigLIP & Florence-2)...")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-clip_model, clip_preprocess = clip.load("ViT-B/32", device=device)
-dino_processor = AutoProcessor.from_pretrained("IDEA-Research/grounding-dino-base")
-dino_model = AutoModelForZeroShotObjectDetection.from_pretrained("IDEA-Research/grounding-dino-base").to(device)
+# Tải Google SigLIP (Lọc thô)
+siglip_model_name = "google/siglip-base-patch16-224"
+siglip_processor = AutoProcessor.from_pretrained(siglip_model_name)
+siglip_model = AutoModel.from_pretrained(siglip_model_name).to(device)
+siglip_model.eval()
+
+# Tải Florence-2 (Trọng tài Re-ranking)
+florence_model_name = "microsoft/Florence-2-base"
+florence_processor = AutoProcessor.from_pretrained(florence_model_name, trust_remote_code=True)
+florence_model = AutoModelForCausalLM.from_pretrained(florence_model_name, trust_remote_code=True).to(device)
+florence_model.eval()
 
 # ==========================================
-# 3. HÀM KIỂM TRA BẰNG GROUNDING DINO (ĐÃ TỐI ƯU Ý 1)
+# 3. HÀM KIỂM TRA BẰNG FLORENCE-2
 # ==========================================
-def get_dino_score(image_path, text_prompt):
+def get_florence_score(image_path, required_objects):
     """
-    Sử dụng toàn bộ cụm từ (VD: 'A woman in a blue shirt') để lấy điểm chính xác nhất.
-    Không dùng threshold cứng để loại bỏ, chỉ trả về điểm số cao nhất tìm được.
+    Yêu cầu Florence-2 tìm các vật thể và chấm điểm dựa trên tỷ lệ tìm thấy.
     """
-    # DINO yêu cầu prompt kết thúc bằng dấu chấm và viết thường
-    dino_query = text_prompt.lower()
-    if not dino_query.endswith("."):
-        dino_query += " ."
+    if not required_objects:
+        return 1.0
         
+    # Ghép các vật thể thành một cụm văn bản
+    text_input = " and ".join(required_objects)
+    
+    # Task Grounding: Yêu cầu mô hình gắn tọa độ cho các từ khóa
+    prompt = f"<CAPTION_TO_PHRASE_GROUNDING> {text_input}"
+    
     try:
         image = Image.open(image_path).convert("RGB")
+        inputs = florence_processor(text=prompt, images=image, return_tensors="pt").to(device)
         
-        inputs = dino_processor(images=image, text=dino_query, return_tensors="pt").to(device)
         with torch.no_grad():
-            outputs = dino_model(**inputs)
+            generated_ids = florence_model.generate(
+                input_ids=inputs["input_ids"],
+                pixel_values=inputs["pixel_values"],
+                max_new_tokens=1024,
+                num_beams=3
+            )
             
-        target_sizes = torch.tensor([image.size[::-1]])
+        generated_text = florence_processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+        parsed_answer = florence_processor.post_process_generation(
+            generated_text, 
+            task="<CAPTION_TO_PHRASE_GROUNDING>", 
+            image_size=(image.width, image.height)
+        )
         
-        # Hạ threshold xuống mức tối thiểu (0.05) để bắt mọi bounding box tiềm năng, 
-        # ta lấy điểm (score) thay vì quan tâm box đó có qua ngưỡng hay không.
-        results = dino_processor.image_processor.post_process_object_detection(
-            outputs, threshold=0.05, target_sizes=target_sizes
-        )[0]
+        # Lấy danh sách các vật thể mà Florence-2 thực sự tìm thấy trong ảnh
+        results = parsed_answer.get('<CAPTION_TO_PHRASE_GROUNDING>', {})
+        labels_found = results.get('labels', [])
         
-        if len(results["scores"]) > 0:
-            return results["scores"].max().item() # Trả về điểm tự tin cao nhất
+        if not labels_found:
+            return 0.0
             
-        return 0.0
+        # Tính điểm dựa trên số lượng từ khóa được tìm thấy
+        unique_labels_found = set(labels_found)
+        score = len(unique_labels_found) / len(required_objects)
+        
+        return min(score, 1.0) # Đảm bảo điểm tối đa không vượt quá 1.0
+        
     except Exception as e:
-        print(f"Lỗi đọc ảnh tại {image_path}: {e}")
+        print(f"Lỗi Florence-2 đọc ảnh tại {image_path}: {e}")
         return 0.0
 
 # ==========================================
-# 4. HÀM TÌM KIẾM VÀ RE-RANK (ĐÃ TỐI ƯU Ý 2)
+# 4. HÀM TÌM KIẾM VÀ RE-RANK KẾT HỢP (SIGLIP + FLORENCE-2)
 # ==========================================
-def search_kis_with_dino(client, parsed_query_data, top_k=5, alpha=0.75):
-    """
-    alpha: Trọng số của CLIP score (0.75 nghĩa là CLIP chiếm 75%, DINO chiếm 25%).
-    Bạn có thể tinh chỉnh thông số này tùy thuộc vào độ tin cậy của CLIP vs DINO.
-    """
+def search_kis_with_florence(client, parsed_query_data, top_k=5, alpha=0.7):
     clip_query = parsed_query_data["clip_query"]
+    required_objects = parsed_query_data["required_objects"]
     
-    print(f"\n[CLIP] Đang mã hóa câu truy vấn: '{clip_query}'")
-    text_inputs = clip.tokenize([clip_query], truncate=True).to(device)
+    print(f"\n[SigLIP] Đang mã hóa câu truy vấn: '{clip_query}'")
+    
+    # Mã hóa văn bản bằng SigLIP
+    text_inputs = siglip_processor(
+        text=[clip_query], 
+        padding="max_length", 
+        return_tensors="pt"
+    ).to(device)
 
     with torch.no_grad():
-        text_features = clip_model.encode_text(text_inputs)
-        text_features /= text_features.norm(dim=-1, keepdim=True)
+        text_features = siglip_model.get_text_features(**text_inputs)
+        text_features = text_features / text_features.norm(p=2, dim=-1, keepdim=True)
         text_vector = text_features[0].cpu().tolist()
 
-    # BƯỚC 1: LỌC THÔ BẰNG CLIP (LẤY TOP 30)
-    print("[Milvus] Đang truy xuất Top 30 khung hình gần giống nhất...") 
+    # BƯỚC 1: LỌC THÔ BẰNG SIGLIP (Top 50)
+    print("[Milvus] Đang truy xuất Top 50 khung hình gần giống nhất...") 
     search_results = client.search(
         collection_name=COLLECTION_NAME,
         data=[text_vector],
-        limit=30, 
-        output_fields=["video_id", "frame_id"],
+        limit=50, 
+        output_fields=["video_id", "frame_id"], # Đã sửa lỗi chính tả ở đây
         search_params={"metric_type": "IP"}
     )
 
-    print(f"[DINO] Đang quét ảnh và chấm điểm tổng hợp (Ensemble Scoring)...")
+    all_hits = []
+    for hits in search_results:
+        for hit in hits:
+            all_hits.append(hit)
+            
+    # BƯỚC 2: CHẤM ĐIỂM KẾT HỢP (ENSEMBLE SCORING)
+    print(f"[Florence-2 & Re-rank] Đang quét và chấm điểm hỗn hợp cho: {required_objects}...")
+
+    scored_results = []
     
-    scored_frames = []
-    
-    # search_results trả về list of hits cho query đầu tiên [0]
-    for hit in search_results[0]: 
+    for hit in tqdm(all_hits, desc="Tiến độ xử lý", unit="ảnh"):
         v_id = hit["entity"]["video_id"]
         f_id = hit["entity"]["frame_id"]
-        clip_score = hit["distance"] # Dải điểm IP của CLIP (thường từ 0.15 - 0.45)
+        clip_score = hit["distance"] # Điểm Similarity của SigLIP
         
         video_folder = v_id.replace(".mp4", "")
         batch_prefix = video_folder.split("_")[0]  
@@ -117,34 +147,40 @@ def search_kis_with_dino(client, parsed_query_data, top_k=5, alpha=0.75):
                 break
         
         if not image_path:
-            print(f"❌ Không tìm thấy đường dẫn: {video_folder} - Frame {f_id}")
             continue
             
-        # Tính điểm DINO dựa trên toàn bộ câu query (Ý 1)
-        dino_score = get_dino_score(image_path, text_prompt=clip_query)
+        # Lấy điểm Florence-2 score
+        florence_score = get_florence_score(image_path, required_objects)
+
+        # Điểm tổng hợp = alpha * điểm_SigLIP + (1 - alpha) * điểm_Florence
+        final_score = alpha * clip_score + (1 - alpha) * florence_score
         
-        # Tính điểm tổng hợp (Ý 2)
-        final_score = (alpha * clip_score) + ((1 - alpha) * dino_score)
-        
-        scored_frames.append({
-            "video_id": v_id,
-            "frame_id": f_id,
+        # Lưu lại thông tin để sort
+        scored_results.append({
+            "hit": hit,
             "clip_score": clip_score,
-            "dino_score": dino_score,
+            "florence_score": florence_score,
             "final_score": final_score
         })
+        
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
-    # BƯỚC 3: SẮP XẾP LẠI (RE-RANK) DỰA TRÊN FINAL SCORE
-    scored_frames = sorted(scored_frames, key=lambda x: x["final_score"], reverse=True)
-    final_top_k = scored_frames[:top_k]
+    # Sắp xếp lại theo điểm tổng hợp từ cao xuống thấp
+    scored_results = sorted(scored_results, key=lambda x: x["final_score"], reverse=True)
 
     print("\n=== KẾT QUẢ TÌM KIẾM CHÍNH THỨC ===")
-    for rank, frame in enumerate(final_top_k, 1):
-        print(f"Top {rank}: video_id = {frame['video_id']}, frame_id = {frame['frame_id']}")
-        print(f"    -> Tổng điểm: {frame['final_score']:.4f} (CLIP: {frame['clip_score']:.4f} | DINO: {frame['dino_score']:.4f})")
+    if not scored_results:
+        print("Không tìm thấy khung hình nào khớp!")
+    else:
+        for item in scored_results[:top_k]:
+            hit = item["hit"]
+            v_id = hit["entity"]["video_id"]
+            f_id = hit["entity"]["frame_id"]
+            print(f"video_id = {v_id}, frame_id = {f_id} | Điểm tổng: {item['final_score']:.4f} (SigLIP: {item['clip_score']:.4f}, Florence: {item['florence_score']:.4f})")
 
 # ==========================================
-# 5. CHẠY CHÍNH (Giữ nguyên)
+# 5. CHẠY CHÍNH
 # ==========================================
 if __name__ == "__main__":
     print("Đang kết nối vào Database...")
@@ -152,14 +188,11 @@ if __name__ == "__main__":
         milvus_client = MilvusClient(MILVUS_DB_PATH)
         milvus_client.load_collection(COLLECTION_NAME) 
         
-        # 1. Nhập câu truy vấn tiếng Việt thô từ Ban Giám Khảo
-        raw_query = input("M kiếm gì? T kiếm: ")
-        
-        # 2. Xử lý ngôn ngữ tự nhiên Offline (Dịch + Trích xuất object)
+        raw_query = input("M kiếm gì?\nT kiếm: ")
         parsed_query_data = analyze_query_offline_mt(raw_query)
         
-        # Thử nghiệm với alpha=0.75 (Tôn trọng ngữ cảnh CLIP nhiều hơn)
-        search_kis_with_dino(milvus_client, parsed_query_data, top_k=5, alpha=0.75)
+        # Chạy tìm kiếm với alpha = 0.7 (70% ưu tiên SigLIP, 30% Florence-2 điều chỉnh)
+        search_kis_with_florence(milvus_client, parsed_query_data, top_k=5, alpha=0.7)
         
     except Exception as e:
         print(f"Lỗi! Chi tiết: {e}")
