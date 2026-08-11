@@ -2,55 +2,82 @@ import os
 import glob
 import numpy as np
 from pymilvus import MilvusClient, DataType
+import shutil
 
 # ==========================================
-# 1. CẤU HÌNH ĐƯỜNG DẪN VÀ THÔNG SỐ
+# 1. CẤU HÌNH ĐƯỜNG DẪN TỔNG (TỰ ĐỘNG QUÉT)
 # ==========================================
-NPY_DIRS = ["/home/khang/Downloads/clip-features-32-aic25-b1/clip-features-32"]  
-KEYFRAMES_DIRS = ["/home/khang/Downloads/Keyframes_L21/keyframes"]          
+# THAY ĐỔI: Trỏ đến thư mục cha chứa tất cả các thư mục/file .npy
+BASE_NPY_DIR = "/home/khang/Documents/clip-features-32-aic25-b1/clip-features-32"  
+
+# THAY ĐỔI: Trỏ đến thư mục cha chứa các folder "Keyframes_L21", "Keyframes_L22",...
+BASE_KEYFRAMES_DIR = "/home/khang/Documents/DATASET"          
+
 MILVUS_DB_PATH = "aic_kis_database.db"
 COLLECTION_NAME = "kis_keyframes"
 
 # ==========================================
-# 2. HÀM ĐỌC VÀ ÁNH XẠ DỮ LIỆU
+# 2. HÀM ĐỌC VÀ ÁNH XẠ DỮ LIỆU TỰ ĐỘNG
 # ==========================================
-def load_data_and_mapping(npy_dirs, keyframes_dirs):
-    print("Đang quét các thư mục và ghép nối đặc trưng...")
+def load_data_and_mapping(base_npy_dir, base_keyframes_dir):
+    print("Đang chuẩn bị từ điển Vector...")
     data_to_insert = []
-    if len(npy_dirs) != len(keyframes_dirs):
-        print("Lỗi: Số lượng thư mục trong NPY_DIRS và KEYFRAMES_DIRS không khớp nhau!")
+    
+    # 1. Dùng os.walk để tìm tự động TẤT CẢ các file .npy trong thư mục gốc
+    npy_map = {}
+    for root, dirs, files in os.walk(base_npy_dir):
+        for file in files:
+            if file.endswith(".npy"):
+                # Cắt bỏ đuôi .npy để lấy tên video (vd: L21_V001)
+                video_folder_name = file.replace(".npy", "")
+                npy_map[video_folder_name] = os.path.join(root, file)
+                
+    print(f"Đã tìm thấy sẵn sàng {len(npy_map)} file vector .npy.")
+
+    # 2. Quét tự động các thư mục chứa ảnh
+    print("\nĐang quét thư mục ảnh và tiến hành ghép nối...")
+    if not os.path.exists(base_keyframes_dir):
+        print(f"Lỗi: Không tìm thấy thư mục cha {base_keyframes_dir}.")
         return []
 
-    for batch_idx, (npy_dir, keyframes_dir) in enumerate(zip(npy_dirs, keyframes_dirs)):
-        print(f"\n--- Đang xử lý Tập dữ liệu {batch_idx + 1} ---")
-        print(f"Thư mục ảnh: {keyframes_dir}")
-        print(f"Thư mục vector: {npy_dir}")
-        
-        try:
-            video_folders = sorted(os.listdir(keyframes_dir))
-        except FileNotFoundError:
-            print(f"Lỗi: Không tìm thấy thư mục {keyframes_dir}. Bỏ qua tập này.")
+    # Lấy tất cả các folder bên trong thư mục cha (L21, L22,...)
+    batch_folders = sorted(os.listdir(base_keyframes_dir))
+    
+    for batch_folder in batch_folders:
+        # Bỏ qua nếu không phải là cấu trúc thư mục của BTC (Keyframes_Lxx)
+        if not batch_folder.startswith("Keyframes_L"):
             continue
-
+            
+        # Đường dẫn tới thư mục "keyframes" bên trong
+        keyframes_dir = os.path.join(base_keyframes_dir, batch_folder, "keyframes")
+        
+        if not os.path.exists(keyframes_dir):
+            continue
+            
+        print(f"--- Đang xử lý tập: {batch_folder} ---")
+        video_folders = sorted(os.listdir(keyframes_dir))
+        
         for video_folder in video_folders:
             folder_path = os.path.join(keyframes_dir, video_folder)
             if not os.path.isdir(folder_path):
                 continue
                 
-            npy_filename = f"{video_folder}.npy"
-            npy_path = os.path.join(npy_dir, npy_filename)
-            
-            if not os.path.exists(npy_path):
+            # ĐỐI CHIẾU THÔNG MINH: Tự động tìm đường dẫn file .npy tương ứng
+            if video_folder not in npy_map:
+                # Nếu BTC thiếu file npy cho video này, tự động bỏ qua
                 continue
-            image_features = np.load(npy_path).astype(np.float32)
+                
+            npy_path = npy_map[video_folder]
             
-            # Chuẩn hóa L2
+            # Đọc và chuẩn hóa vector
+            image_features = np.load(npy_path).astype(np.float32)
             image_features = image_features / np.linalg.norm(image_features, axis=1, keepdims=True)
             
-            # Sắp xếp ảnh theo thứ tự số học
+            # Đọc và sắp xếp ảnh (đảm bảo đúng thứ tự số học 1, 2, 3...)
             frames = glob.glob(os.path.join(folder_path, "*.jpg"))
             frames = sorted(frames, key=lambda x: int(os.path.splitext(os.path.basename(x))[0]))
             
+            # Khắc phục lỗi lệch số lượng nếu có
             if len(frames) != len(image_features):
                 min_len = min(len(frames), len(image_features))
                 frames = frames[:min_len]
@@ -58,8 +85,7 @@ def load_data_and_mapping(npy_dirs, keyframes_dirs):
 
             for i, frame_path in enumerate(frames):
                 video_id = f"{video_folder}.mp4"
-                frame_filename = os.path.basename(frame_path)
-                frame_id = int(os.path.splitext(frame_filename)[0])
+                frame_id = int(os.path.splitext(os.path.basename(frame_path))[0])
                 
                 record = {
                     "video_id": video_id,
@@ -68,7 +94,7 @@ def load_data_and_mapping(npy_dirs, keyframes_dirs):
                 }
                 data_to_insert.append(record)
                 
-    print(f"\nHoàn tất! Đã ánh xạ (map) thành công tổng cộng {len(data_to_insert)} khung hình từ tất cả các tập.")
+    print(f"\nHoàn tất! Đã ánh xạ (map) thành công tổng cộng {len(data_to_insert)} khung hình.")
     return data_to_insert
 
 # ==========================================
@@ -107,11 +133,13 @@ def setup_milvus_and_insert(data):
 
 # ==========================================
 if __name__ == "__main__":
-    # Đảm bảo xóa database cũ (nếu có) trước khi tạo mới để tránh lỗi
     if os.path.exists(MILVUS_DB_PATH):
-        os.remove(MILVUS_DB_PATH)
+        if os.path.isdir(MILVUS_DB_PATH):
+            shutil.rmtree(MILVUS_DB_PATH)
+        else:
+            os.remove(MILVUS_DB_PATH)
         print(f"Đã xóa database cũ: {MILVUS_DB_PATH}")
 
-    data = load_data_and_mapping(NPY_DIRS, KEYFRAMES_DIRS)
+    data = load_data_and_mapping(BASE_NPY_DIR, BASE_KEYFRAMES_DIR)
     if data:
         setup_milvus_and_insert(data)

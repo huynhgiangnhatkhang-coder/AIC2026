@@ -1,0 +1,4 @@
+numpy==1.26.4
+torch==2.3.1
+pymilvus[milvus_lite]==2.4.4
+git+https://github.com/openai/CLIP.git
