@@ -1,4 +1,57 @@
-numpy==1.26.4
-torch==2.3.1
-pymilvus[milvus_lite]==2.4.4
-git+https://github.com/openai/CLIP.git
+# AIC 2026 Baseline — Dependencies
+# Install: pip install -r requirements.txt
+
+# ── Core ML ─────────────────────────────────────────────────
+torch>=2.1.0
+torchvision>=0.16.0
+transformers>=4.40.0
+accelerate>=0.27.0
+
+# ── CLIP ────────────────────────────────────────────────────
+openai-clip              # pip install git+https://github.com/openai/CLIP.git
+# OR: open_clip_torch    # nếu dùng open_clip
+
+# ── Vector Search ───────────────────────────────────────────
+faiss-cpu                # hoặc faiss-gpu nếu có GPU
+# faiss-gpu
+
+# ── BM25 Full-text ──────────────────────────────────────────
+rank-bm25
+
+# ── Image Processing ────────────────────────────────────────
+Pillow>=10.0.0
+opencv-python-headless
+
+# ── Data ────────────────────────────────────────────────────
+numpy>=1.24.0
+pandas
+scikit-learn
+
+# ── API ─────────────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]
+python-multipart
+pydantic>=2.0.0
+
+# ── Utilities ───────────────────────────────────────────────
+PyYAML
+tqdm
+requests
+python-dotenv
+
+# ── VQA (BLIP-2 / optional) ──────────────────────────────── 
+# Uncomment if using BLIP-2 for Q&A queries:
+# Salesforce-BLIP2 is included via transformers>=4.27
+# sentencepiece   # if using T5-based models
+
+# ── Translation (Offline Vi→En) ─────────────────────────────
+sentencepiece    # cần cho Helsinki-NLP/opus-mt-vi-en tokenizer
+sacremoses       # cần cho MarianTokenizer (Marian MT)
+
+# ── Grounding DINO (Re-ranking) ──────────────────────────────
+# IDEA-Research/grounding-dino-base được tải tự động qua transformers
+# Không cần cài thêm gói riêng, đã bao gồm trong transformers>=4.40.0
+
+# ── Optional: LLM Query Expansion ───────────────────────────
+# openai        # for GPT-based query expansion
+# google-generativeai  # for Gemini

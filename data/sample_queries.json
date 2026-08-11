@@ -1,0 +1,45 @@
+{
+  "queries": [
+    {
+      "query_id": "q001",
+      "query_type": "textual_kis",
+      "query_text": "Một người đang mở laptop trong phòng họp",
+      "ground_truth": {
+        "video_id": "L01_V001",
+        "frame_start": 500,
+        "frame_end": 510
+      }
+    },
+    {
+      "query_id": "q002",
+      "query_type": "qa",
+      "retrieval_query": "Cảnh bữa tiệc trong nhà hàng",
+      "question": "Người phụ nữ mặc váy đỏ đang cầm gì?",
+      "ground_truth": {
+        "video_id": "L05_V005",
+        "frame_start": 800,
+        "frame_end": 900,
+        "answer": "ly rượu"
+      }
+    },
+    {
+      "query_id": "q003",
+      "query_type": "trake",
+      "events": [
+        "vận động viên chạy đà chuẩn bị nhảy cao",
+        "vận động viên giậm nhảy rời khỏi mặt đất",
+        "vận động viên bay qua xà ngang",
+        "vận động viên tiếp đất vào đệm"
+      ],
+      "ground_truth": {
+        "video_id": "L10_V010",
+        "events": [
+          {"frame_start": 85, "frame_end": 95},
+          {"frame_start": 95, "frame_end": 105},
+          {"frame_start": 145, "frame_end": 155},
+          {"frame_start": 195, "frame_end": 205}
+        ]
+      }
+    }
+  ]
+}

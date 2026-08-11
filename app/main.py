@@ -1,0 +1,369 @@
+"""
+AIC 2026 Baseline — FastAPI REST API
+======================================
+Web service cho phép gửi query qua HTTP và nhận kết quả JSON.
+
+Endpoints:
+  POST /search/kis      — Textual KIS
+  POST /search/qa       — Q&A / VQA
+  POST /search/trake    — TRAKE temporal
+  GET  /health          — Health check
+
+Usage:
+  uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+"""
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
+import yaml
+
+from src.retrieval import CLIPRetriever, BM25Retriever, HybridRetriever
+from src.query import TextualKISSearcher, QASearcher, TRAKESearcher
+from src.submission import SubmissionManager
+
+# ── Load config ────────────────────────────────────────────
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config.yaml")
+with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    cfg = yaml.safe_load(f)
+    
+# ── Init components (lazy — sẽ load khi nhận request đầu tiên) ─
+_clip_retriever = None       # CLIPRetriever (FAISS backend)
+_milvus_retriever = None     # MilvusRetriever (Milvus backend)
+_bm25_retriever = None
+_hybrid_retriever = None
+_kis_searcher = None
+_qa_searcher = None
+_trake_searcher = None
+
+_BACKEND = cfg.get("retrieval_backend", "milvus").lower()
+
+
+def get_vector_retriever():
+    """Trả về vector retriever (Milvus hoặc FAISS) tuỳ theo config."""
+    global _milvus_retriever, _clip_retriever
+
+    if _BACKEND == "milvus":
+        if _milvus_retriever is None:
+            from src.retrieval import MilvusRetriever
+            _milvus_retriever = MilvusRetriever(
+                db_path=cfg["index"]["milvus_db_path"],
+                collection_name=cfg["index"]["milvus_collection"],
+                model_name=cfg["clip"]["model_name"],
+                device=cfg["clip"]["device"]
+            )
+        return _milvus_retriever
+    else:
+        if _clip_retriever is None:
+            from src.retrieval import CLIPRetriever
+            _clip_retriever = CLIPRetriever(
+                index_path=cfg["index"]["faiss_index_path"],
+                frame_map_path=cfg["index"]["frame_map_path"],
+                model_name=cfg["clip"]["model_name"],
+                device=cfg["clip"]["device"]
+            )
+        return _clip_retriever
+
+# keep old name for backward compat
+def get_clip_retriever():
+    return get_vector_retriever()
+
+
+def get_bm25_retriever() -> BM25Retriever:
+    global _bm25_retriever
+    if _bm25_retriever is None:
+        _bm25_retriever = BM25Retriever(
+            corpus_path=cfg["index"]["bm25_corpus_path"],
+            frame_map_path=cfg["index"]["frame_map_path"]
+        )
+    return _bm25_retriever
+
+
+def get_hybrid_retriever() -> HybridRetriever:
+    global _hybrid_retriever
+    if _hybrid_retriever is None:
+        _hybrid_retriever = HybridRetriever(
+            vector_retriever=get_vector_retriever(),
+            bm25_retriever=get_bm25_retriever(),
+            clip_weight=cfg["retrieval"]["clip_weight"],
+            bm25_weight=cfg["retrieval"]["bm25_weight"]
+        )
+    return _hybrid_retriever
+
+
+def get_kis_searcher() -> TextualKISSearcher:
+    global _kis_searcher
+    if _kis_searcher is None:
+        _kis_searcher = TextualKISSearcher(
+            retriever=get_hybrid_retriever(),
+            objects_dir=str(
+                os.path.join(cfg["data"]["root"], cfg["data"]["objects_dir"])
+            ),
+            max_answers=cfg["retrieval"]["final_top_k"]
+        )
+    return _kis_searcher
+
+
+def get_qa_searcher() -> QASearcher:
+    global _qa_searcher
+    if _qa_searcher is None:
+        _qa_searcher = QASearcher(
+            retriever=get_hybrid_retriever(),
+            vqa_model_name=cfg["vqa"]["model"],
+            device=cfg["vqa"]["device"],
+            top_k_frames_for_vqa=cfg["vqa"]["top_k_frames"],
+            max_answers=cfg["retrieval"]["final_top_k"]
+        )
+    return _qa_searcher
+
+
+def get_trake_searcher() -> TRAKESearcher:
+    global _trake_searcher
+    if _trake_searcher is None:
+        _trake_searcher = TRAKESearcher(
+            clip_retriever=get_vector_retriever(),
+            top_k_per_event=cfg["trake"]["top_k_per_event"],
+            max_answers=cfg["retrieval"]["final_top_k"]
+        )
+    return _trake_searcher
+
+
+# ── FastAPI App ────────────────────────────────────────────
+app = FastAPI(
+    title="AIC 2026 Baseline API",
+    description="Video Retrieval baseline cho AIC 2026 Vòng Sơ Tuyển",
+    version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── Request / Response Models ──────────────────────────────
+
+class KISRequest(BaseModel):
+    query: str = Field(..., description="Mô tả văn bản cần tìm", example="Một người đang mở laptop trong phòng họp")
+    object_hints: Optional[List[str]] = Field(None, description="Các object keywords để boost", example=["laptop", "person"])
+    top_k: int = Field(100, ge=1, le=100)
+
+
+class QARequest(BaseModel):
+    retrieval_query: str = Field(..., description="Mô tả cảnh cần tìm (cho retrieval)")
+    question: str = Field(..., description="Câu hỏi VQA", example="Người phụ nữ mặc váy màu gì?")
+    use_vqa: bool = Field(True, description="Có chạy VQA model không")
+    top_k: int = Field(100, ge=1, le=100)
+
+
+class TRAKERequest(BaseModel):
+    events: List[str] = Field(..., description="Danh sách N mô tả sự kiện theo thứ tự",
+                               example=["vận động viên giậm nhảy", "bay qua xà ngang", "tiếp đất"])
+    top_k: int = Field(100, ge=1, le=100)
+
+
+class AnswerItem(BaseModel):
+    rank: int
+    video_id: str
+    frame_id: Optional[int] = None
+    frame_ids: Optional[List[int]] = None
+    answer: Optional[str] = None
+    score: float
+    formatted: str  # chuỗi nộp bài
+
+
+class SearchResponse(BaseModel):
+    query_type: str
+    num_results: int
+    answers: List[AnswerItem]
+
+
+# ── Endpoints ─────────────────────────────────────────────
+
+@app.get("/health")
+def health():
+    """Health check endpoint."""
+    return {
+        "status": "ok",
+        "service": "AIC2026 Baseline API",
+        "version": "1.0.0"
+    }
+
+
+@app.get("/info")
+def info():
+    """Thông tin về index và model đang dùng."""
+    import os
+    return {
+        "clip_model": cfg["clip"]["model_name"],
+        "clip_device": cfg["clip"]["device"],
+        "faiss_index": cfg["index"]["faiss_index_path"],
+        "faiss_exists": os.path.exists(cfg["index"]["faiss_index_path"]),
+        "bm25_corpus": cfg["index"]["bm25_corpus_path"],
+        "bm25_exists": os.path.exists(cfg["index"]["bm25_corpus_path"]),
+        "vqa_model": cfg["vqa"]["model"],
+    }
+
+
+@app.post("/search/kis", response_model=SearchResponse)
+def search_kis(req: KISRequest):
+    """
+    **Textual KIS** — Tìm kiếm theo mô tả văn bản.
+    
+    Trả về top-100 cặp (video_id, frame_id).
+    """
+    try:
+        searcher = get_kis_searcher()
+        results = searcher.search(req.query, object_hints=req.object_hints)
+
+        answers = []
+        for r in results[:req.top_k]:
+            answers.append(AnswerItem(
+                rank=r["rank"],
+                video_id=r["video_id"],
+                frame_id=r["frame_id"],
+                score=r.get("score", 0.0),
+                formatted=f"{r['video_id']}, {r['frame_id']}"
+            ))
+
+        return SearchResponse(
+            query_type="textual_kis",
+            num_results=len(answers),
+            answers=answers
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/search/qa", response_model=SearchResponse)
+def search_qa(req: QARequest):
+    """
+    **Q&A (VQA)** — Tìm kiếm và trả lời câu hỏi trực quan.
+    
+    Trả về top-100 bộ (video_id, frame_id, answer).
+    """
+    try:
+        searcher = get_qa_searcher()
+        results = searcher.search(
+            query=req.retrieval_query,
+            question=req.question,
+            use_vqa=req.use_vqa
+        )
+
+        answers = []
+        for r in results[:req.top_k]:
+            answers.append(AnswerItem(
+                rank=r["rank"],
+                video_id=r["video_id"],
+                frame_id=r["frame_id"],
+                answer=r.get("answer", ""),
+                score=r.get("score", 0.0),
+                formatted=f"{r['video_id']}, {r['frame_id']}, {r.get('answer', '')}"
+            ))
+
+        return SearchResponse(
+            query_type="qa",
+            num_results=len(answers),
+            answers=answers
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/search/trake", response_model=SearchResponse)
+def search_trake(req: TRAKERequest):
+    """
+    **TRAKE** — Tìm chuỗi sự kiện theo thứ tự thời gian.
+    
+    Trả về top-100 bộ (video_id, frame_id_1, ..., frame_id_N).
+    """
+    if len(req.events) == 0:
+        raise HTTPException(status_code=400, detail="Cần ít nhất 1 sự kiện")
+    if len(req.events) > 10:
+        raise HTTPException(status_code=400, detail="Tối đa 10 sự kiện")
+
+    try:
+        searcher = get_trake_searcher()
+        results = searcher.search(req.events)
+
+        answers = []
+        for r in results[:req.top_k]:
+            fids = r.get("frame_ids", [])
+            answers.append(AnswerItem(
+                rank=r["rank"],
+                video_id=r["video_id"],
+                frame_ids=fids,
+                score=r.get("total_score", 0.0),
+                formatted=f"{r['video_id']}, " + ", ".join(str(f) for f in fids)
+            ))
+
+        return SearchResponse(
+            query_type="trake",
+            num_results=len(answers),
+            answers=answers
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/submit")
+def submit_batch(queries: List[Dict[str, Any]]):
+    """
+    Batch submission: nhận danh sách queries, trả về toàn bộ formatted answers.
+    
+    Input format:
+    [
+      {"query_id": "q1", "query_type": "textual_kis", "query_text": "..."},
+      {"query_id": "q2", "query_type": "qa", "retrieval_query": "...", "question": "..."},
+      {"query_id": "q3", "query_type": "trake", "events": ["...", "..."]}
+    ]
+    """
+    manager = SubmissionManager(output_dir=cfg["submission"]["output_dir"])
+    all_submissions = []
+
+    for q in queries:
+        qtype = q.get("query_type", "textual_kis").lower()
+        qid = q.get("query_id", "unknown")
+
+        try:
+            if qtype in ("textual_kis", "kis"):
+                searcher = get_kis_searcher()
+                results = searcher.search(q.get("query_text", ""))
+                formatted = searcher.format_submission(results)
+            elif qtype in ("qa", "vqa"):
+                searcher = get_qa_searcher()
+                results = searcher.search(
+                    query=q.get("retrieval_query", q.get("query_text", "")),
+                    question=q.get("question", q.get("query_text", "")),
+                    use_vqa=q.get("use_vqa", True)
+                )
+                formatted = searcher.format_submission(results)
+            elif qtype == "trake":
+                searcher = get_trake_searcher()
+                results = searcher.search(q.get("events", []))
+                formatted = searcher.format_submission(results)
+            else:
+                formatted = []
+
+            sub = manager.build_query_submission(
+                {"query_id": qid, "query_type": qtype},
+                results if "results" in dir() else []
+            )
+            all_submissions.append(sub)
+
+        except Exception as e:
+            all_submissions.append({
+                "query_id": qid,
+                "query_type": qtype,
+                "error": str(e),
+                "answers": []
+            })
+
+    # Lưu file
+    paths = manager.save_all(all_submissions)
+    return {"submissions": all_submissions, "saved_to": paths}

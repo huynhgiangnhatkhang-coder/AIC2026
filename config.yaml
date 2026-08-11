@@ -1,0 +1,74 @@
+# ============================================================
+# AIC 2026 Vòng Sơ Tuyển — Baseline Config
+# ============================================================
+
+# --- Retrieval Backend ---
+# "milvus"  : dùng Milvus Lite (khuyến nghị — nhanh hơn, lưu video_id/frame_id trực tiếp)
+# "faiss"   : dùng FAISS + frame_map.json (fallback)
+retrieval_backend: "milvus"
+
+# --- Paths ---
+data:
+  root: "f:/aic/Dataset"              # thư mục gốc dataset
+  videos_dir: "Videos"                # Videos/L01_V001.mp4 ...
+  keyframes_dir: "Keyframes"          # Keyframes/L01_V001/0000.jpg ...
+  objects_dir: "Objects"              # Objects/L01_V001/0000.json ...
+  metadata_dir: "Metadata"            # Metadata/L01_V001.json ...
+  clip_features_npy: "clip_features.npy"  # single .npy (dùng khi backend=faiss)
+
+  # Per-video .npy directories (dùng khi backend=milvus)
+  # Thư mục .npy từ AIC2026 (flat — tất cả .npy nằm trong 1 thư mục duy nhất)
+  npy_dirs:
+    - "f:/aic/AIC2026/clip-features-32-aic25-b1/clip-features-32"
+
+  # Thư mục chứa Keyframes (theo cấu trúc BTC AIC: Keyframes_L21/keyframes/L21_V001/...)
+  # TextualKISSearcher sẽ tự tìm ảnh trong cấu trúc này
+  keyframes_root: "f:/aic/Dataset/keyframes"
+
+index:
+  # --- Milvus Lite (sử dụng DB từ AIC2026) ---
+  milvus_db_path: "f:/aic/Dataset/aic_kis_database.db"
+  milvus_collection: "kis_keyframes"
+
+  # --- FAISS (fallback) ---
+  faiss_index_path: "f:/aic/baseline/indexes/clip_faiss.index"
+  frame_map_path:   "f:/aic/baseline/indexes/frame_map.json"
+  bm25_corpus_path: "f:/aic/baseline/indexes/bm25_corpus.json"
+
+# --- CLIP Model ---
+clip:
+  model_name: "ViT-B/32"   # phải khớp với model đã dùng để tạo clip_features.npy
+  device: "cuda"            # "cuda" hoặc "cpu"
+
+# --- Retrieval ---
+retrieval:
+  top_k_clip: 500           # số frame lấy từ CLIP search
+  top_k_bm25: 200           # số frame lấy từ BM25 search (không dùng cho KIS nữa)
+  top_k_object: 200         # số frame lấy từ object search
+  final_top_k: 100          # số câu trả lời nộp cho mỗi query
+  clip_weight: 0.7
+  bm25_weight: 0.3
+
+# --- DINO Re-ranking (cho Textual KIS) ---
+dino:
+  model_name: "IDEA-Research/grounding-dino-base"
+  top_k_coarse: 30          # số frame CLIP lấy ra để DINO chấm điểm (giống AIC2026)
+  alpha_clip: 0.75          # trọng số CLIP (DINO = 1 - alpha)
+  threshold: 0.05           # ngưỡng detect tối thiểu của DINO
+
+# --- VQA (Q&A queries) ---
+vqa:
+  model: "Salesforce/blip2-opt-2.7b"   # VQA model (BLIP-2)
+  # alternatives: "llava-hf/llava-1.5-7b-hf", "Qwen/Qwen2-VL-7B-Instruct"
+  device: "cuda"
+  top_k_frames: 5           # số frame top để chạy VQA
+
+# --- TRAKE (temporal queries) ---
+trake:
+  top_k_per_event: 300      # candidates per sub-event
+  # dp algorithm cho monotone chain
+
+# --- Submission ---
+submission:
+  output_dir: "f:/aic/baseline/submissions"
+  max_answers_per_query: 100
