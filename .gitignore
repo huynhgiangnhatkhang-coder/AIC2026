@@ -1,5 +1,5 @@
 # Thư mục Dataset rất nặng (hàng trăm GB ảnh, video, vector, DB) - KHÔNG ĐƯỢC COMMIT LÊN GITHUB
-/Dataset/
+/DATASET/
 
 # Các thư mục chứa kết quả/chạy mô hình
 /submissions/
@@ -28,5 +28,6 @@ venv.bak/
 
 # Old datasets/DBs from main
 aic_kis_database.db/
-aic_kis_database_siglip.db/
 clip-features-32-aic25-b1/
+aic_kis_database_siglip.db/
+objects-aic25-b1/
