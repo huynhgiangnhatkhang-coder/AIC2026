@@ -13,7 +13,7 @@ MILVUS_DB_PATH = "aic_kis_database.db"
 COLLECTION_NAME = "kis_keyframes"
 
 # ĐƯỜNG DẪN TỚI THƯ MỤC CHỨA ẢNH GỐC (Trỏ thẳng vào thư mục DATASET của bạn)
-KEYFRAMES_DIR = "/home/khang/Documents/PROJECT/AIC2026/DATASET"
+KEYFRAMES_DIR = "DATASET"
 
 # ==========================================
 # 2. KHỞI TẠO MÔ HÌNH (CLIP & GROUNDING DINO)
@@ -161,7 +161,7 @@ if __name__ == "__main__":
         milvus_client.load_collection(COLLECTION_NAME) 
         
         # 1. Nhập câu truy vấn tiếng Việt thô từ Ban Giám Khảo
-        raw_query = "Phụ nữ, áo vàng"
+        raw_query = "Phụ nữ, áo đầm vàng"
         
         # 2. Xử lý ngôn ngữ tự nhiên Offline (Dịch + Trích xuất object)
         parsed_query_data = analyze_query_offline_mt(raw_query)

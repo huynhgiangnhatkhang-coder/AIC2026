@@ -8,15 +8,7 @@ MT_MODEL_NAME = "Helsinki-NLP/opus-mt-vi-en"
 mt_tokenizer = MarianTokenizer.from_pretrained(MT_MODEL_NAME)
 mt_model = MarianMTModel.from_pretrained(MT_MODEL_NAME)
 
-# 1. BỘ TỪ ĐIỂN ÁNH XẠ OBJECTS (Giữ nguyên như cũ)
-OPENIMAGES_CLASSES_MAP = {
-    "Tree": ["cây xanh", "cây cối", "cái cây", "rừng"],
-    "Person": ["người", "đàn ông", "phụ nữ", "nhân viên", "diễn giả", "cảnh sát"],
-    "Car": ["xe hơi", "ô tô", "xe con"],
-    # ... bổ sung thêm ...
-}
-
-# 2. CÁC TỪ VÔ NGHĨA CẦN KHỬ NHIỄU
+# CÁC TỪ VÔ NGHĨA CẦN KHỬ NHIỄU TRƯỚC KHI DỊCH
 STOP_PHRASES = [
     "tìm video về", "tìm video", "có cảnh", "cho tôi xem", 
     "hãy tìm", "video quay cảnh", "xuất hiện", "hình ảnh", "phía sau có"
@@ -25,37 +17,41 @@ STOP_PHRASES = [
 def analyze_query_offline_mt(vietnamese_query):
     print("\nĐang phân tích truy vấn và dịch thuật Offline...")
     query_lower = vietnamese_query.lower()
-    required_objects = []
 
-    # PHẦN A: TRÍCH XUẤT OBJECT BẰNG TỪ ĐIỂN
-    for eng_class, vi_synonyms in OPENIMAGES_CLASSES_MAP.items():
-        for syn in vi_synonyms:
-            if re.search(fr'\b{syn}\b', query_lower):
-                required_objects.append(eng_class)
-                break
-
-    # PHẦN B: KHỬ NHIỄU
+    # PHẦN A: KHỬ NHIỄU TIẾNG VIỆT
     cleaned_query = query_lower
     for phrase in STOP_PHRASES:
         cleaned_query = re.sub(fr'\b{phrase}\b', '', cleaned_query).strip()
-    cleaned_query = re.sub(' +', ' ', cleaned_query) # Xóa khoảng trắng thừa
+    
+    # Xóa khoảng trắng thừa
+    cleaned_query = re.sub(' +', ' ', cleaned_query).strip()
 
-    # PHẦN C: DỊCH SANG TIẾNG ANH BẰNG OPUS-MT (100% OFFLINE)
-    # Tokenize câu tiếng Việt
+    # PHẦN B: DỊCH SANG TIẾNG ANH (100% OFFLINE)
     inputs = mt_tokenizer(cleaned_query, return_tensors="pt", padding=True)
     
-    # Sinh câu dịch
     with torch.no_grad():
         translated_tokens = mt_model.generate(**inputs)
         
-    # Giải mã (Decode) ra văn bản tiếng Anh
     clip_query = mt_tokenizer.decode(translated_tokens[0], skip_special_tokens=True)
+
+    # PHẦN C: LẤY OBJECT TRỰC TIẾP TỪ BẢN DỊCH
+    # 1. Chuyển thành chữ thường và xóa dấu chấm ở cuối (thường do AI dịch tự động thêm vào)
+    clean_eng = clip_query.replace(".", "").lower().strip()
+    
+    # 2. Tách câu thành danh sách vật thể dựa trên dấu phẩy hoặc chữ "and"
+    # Ví dụ: "women, yellow shirts" -> ["women", "yellow shirts"]
+    # Ví dụ: "a red car and a dog" -> ["a red car", "a dog"]
+    raw_objects = re.split(r',|\band\b', clean_eng)
+    
+    # 3. Lọc bỏ các khoảng trắng thừa ở hai đầu mỗi object
+    required_objects = [obj.strip() for obj in raw_objects if obj.strip()]
 
     print(f"-> Câu tiếng Việt đã lọc: '{cleaned_query}'")
     print(f"-> Dịch sang tiếng Anh (Opus-MT): '{clip_query}'")
-    print(f"-> Vật thể bắt buộc: {required_objects}")
+    print(f"-> Vật thể bắt buộc trích xuất: {required_objects}")
     
     return {
         "clip_query": clip_query,
         "required_objects": required_objects
     }
+    
