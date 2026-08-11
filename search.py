@@ -153,7 +153,7 @@ if __name__ == "__main__":
         milvus_client.load_collection(COLLECTION_NAME) 
         
         # 1. Nhập câu truy vấn tiếng Việt thô từ Ban Giám Khảo
-        raw_query = "Phụ nữ, áo đầm vàng"
+        raw_query = input("M kiếm gì? T kiếm: ")
         
         # 2. Xử lý ngôn ngữ tự nhiên Offline (Dịch + Trích xuất object)
         parsed_query_data = analyze_query_offline_mt(raw_query)

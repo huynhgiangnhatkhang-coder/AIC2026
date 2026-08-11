@@ -11,7 +11,8 @@ mt_model = MarianMTModel.from_pretrained(MT_MODEL_NAME)
 # CÁC TỪ VÔ NGHĨA CẦN KHỬ NHIỄU TRƯỚC KHI DỊCH
 STOP_PHRASES = [
     "tìm video về", "tìm video", "có cảnh", "cho tôi xem", 
-    "hãy tìm", "video quay cảnh", "xuất hiện", "hình ảnh", "phía sau có"
+    "hãy tìm", "video quay cảnh", "xuất hiện", "hình ảnh", "phía sau có",
+    "con", "đang", "cái",
 ]
 
 def analyze_query_offline_mt(vietnamese_query):
@@ -54,4 +55,3 @@ def analyze_query_offline_mt(vietnamese_query):
         "clip_query": clip_query,
         "required_objects": required_objects
     }
-    
