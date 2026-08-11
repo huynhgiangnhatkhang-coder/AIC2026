@@ -8,10 +8,10 @@ import shutil
 # 1. CẤU HÌNH ĐƯỜNG DẪN TỔNG (TỰ ĐỘNG QUÉT)
 # ==========================================
 # THAY ĐỔI: Trỏ đến thư mục cha chứa tất cả các thư mục/file .npy
-BASE_NPY_DIR = "../clip-features-32-aic25-b1/clip-features-32"  
+BASE_NPY_DIR = "clip-features-32-aic25-b1"  
 
 # THAY ĐỔI: Trỏ đến thư mục cha chứa các folder "Keyframes_L21", "Keyframes_L22",...
-BASE_KEYFRAMES_DIR = "../DATASET"          
+BASE_KEYFRAMES_DIR = "DATASET"          
 
 MILVUS_DB_PATH = "aic_kis_database.db"
 COLLECTION_NAME = "kis_keyframes"
