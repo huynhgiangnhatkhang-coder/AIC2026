@@ -28,7 +28,11 @@ siglip_model.eval()
 # Tải Florence-2 (Trọng tài Re-ranking)
 florence_model_name = "microsoft/Florence-2-base"
 florence_processor = AutoProcessor.from_pretrained(florence_model_name, trust_remote_code=True)
-florence_model = AutoModelForCausalLM.from_pretrained(florence_model_name, trust_remote_code=True).to(device)
+florence_model = AutoModelForCausalLM.from_pretrained(
+    florence_model_name, 
+    trust_remote_code=True,
+    attn_implementation="sdpa" # Dùng cơ chế tăng tốc tích hợp sẵn của PyTorch
+).to(device)
 florence_model.eval()
 
 # ==========================================
