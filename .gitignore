@@ -1,0 +1,27 @@
+# Thư mục Dataset rất nặng (hàng trăm GB ảnh, video, vector, DB) - KHÔNG ĐƯỢC COMMIT LÊN GITHUB
+/Dataset/
+
+# Các thư mục chứa kết quả/chạy mô hình
+/submissions/
+/indexes/
+search_output.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs/Editors
+.vscode/
+.idea/
+*.swp
