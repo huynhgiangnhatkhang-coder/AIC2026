@@ -16,7 +16,7 @@ data:
 
   npy_dirs:
     - "./clip-features-32-aic25-b1/clip-features-32"
-    
+
   # Trỏ vào thư mục chứa trực tiếp video folders (L21_V001, L21_V002...)
   keyframes_dirs_list:
     - "./DATASET/Keyframes_L21/keyframes"
@@ -27,12 +27,12 @@ data:
 
 index:
   # Milvus Lite Config
-  milvus_db_path: "aic_kis_database_siglip.db"
-  milvus_collection: "kis_keyframes_siglip"
+  milvus_db_path: "./aic_kis_database_siglip.db"
+  milvus_collection: "./kis_keyframes_siglip"
 
   # FAISS (fallback)
   faiss_index_path: "./indexes/clip_faiss.index"
-  frame_map_path:   "./indexes/frame_map.json"
+  frame_map_path: "./indexes/frame_map.json"
   bm25_corpus_path: "./indexes/bm25_corpus.json"
 
 # --- CLIP Model ---
