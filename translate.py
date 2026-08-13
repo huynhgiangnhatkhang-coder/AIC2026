@@ -1,12 +1,13 @@
 import re
 import torch
-from transformers import MarianMTModel, MarianTokenizer
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
-print("Đang tải mô hình dịch thuật Offline (opus-mt-vi-en)...")
-# Tải mô hình dịch thuật cục bộ
-MT_MODEL_NAME = "Helsinki-NLP/opus-mt-vi-en"
-mt_tokenizer = MarianTokenizer.from_pretrained(MT_MODEL_NAME)
-mt_model = MarianMTModel.from_pretrained(MT_MODEL_NAME)
+print("Đang tải mô hình dịch thuật Offline (VietAI/envit5-translation)...")
+# Tải mô hình dịch thuật cục bộ T5
+MT_MODEL_NAME = "VietAI/envit5-translation"
+mt_tokenizer = AutoTokenizer.from_pretrained(MT_MODEL_NAME)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+mt_model = AutoModelForSeq2SeqLM.from_pretrained(MT_MODEL_NAME).to(device)
 
 # CÁC TỪ VÔ NGHĨA CẦN KHỬ NHIỄU TRƯỚC KHI DỊCH
 STOP_PHRASES = [
@@ -15,6 +16,12 @@ STOP_PHRASES = [
     "tìm cho tôi", "tìm giúp tôi", "cho xem", "tìm", "những", "các",
     "con", "đang", "cái", "một chiếc", "một", "chiếc",
 ]
+
+def is_english(text):
+    # Một hàm kiểm tra nhanh xem query có phải tiếng Anh không
+    # Nếu không có dấu tiếng Việt nào, khả năng cao là tiếng Anh
+    vi_chars = "àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ"
+    return not any(c in text.lower() for c in vi_chars)
 
 def analyze_query_offline_mt(vietnamese_query):
     print("\nĐang phân tích truy vấn và dịch thuật Offline...")
@@ -59,17 +66,26 @@ def analyze_query_offline_mt(vietnamese_query):
 
     query_with_placeholders = " ".join(new_words)
 
-    # PHẦN B: DỊCH SANG TIẾNG ANH (100% OFFLINE)
-    inputs = mt_tokenizer(query_with_placeholders, return_tensors="pt", padding=True)
-    
-    with torch.no_grad():
-        translated_tokens = mt_model.generate(**inputs)
+    # BYPASS DỊCH THUẬT: Nếu query nhập vào là tiếng Anh, không dịch nữa
+    if is_english(cleaned_query):
+        clip_query = cleaned_query
+        print("-> Bypass dịch thuật (Query là tiếng Anh)")
+    else:
+        # PHẦN B: DỊCH SANG TIẾNG ANH (100% OFFLINE)
+        # envit5-translation cần tiền tố "vi: " để dịch sang tiếng Anh
+        input_text = "vi: " + query_with_placeholders
+        inputs = mt_tokenizer(input_text, return_tensors="pt", padding=True).to(device)
         
-    clip_query = mt_tokenizer.decode(translated_tokens[0], skip_special_tokens=True)
+        with torch.no_grad():
+            translated_tokens = mt_model.generate(**inputs, max_length=512)
+            
+        raw_translation = mt_tokenizer.decode(translated_tokens[0], skip_special_tokens=True)
+        # Bỏ tiền tố "en: " do model sinh ra
+        clip_query = raw_translation.replace("en: ", "", 1).strip()
 
     # Khôi phục danh từ riêng
     for i, p_noun in enumerate(proper_nouns):
-        # Opus-MT có thể gắn thêm dấu cách hoặc viết thường placeholder, ta replace linh hoạt
+        # Model có thể gắn thêm dấu cách hoặc viết thường placeholder, ta replace linh hoạt
         clip_query = re.sub(fr'(?i)loc{i}', p_noun, clip_query)
 
     # PHẦN C: LẤY OBJECT TRỰC TIẾP TỪ BẢN DỊCH
@@ -95,8 +111,11 @@ def analyze_query_offline_mt(vietnamese_query):
     print(f"-> Câu tiếng Việt đã lọc: '{cleaned_query}'")
     print(f"-> Dịch sang tiếng Anh (Opus-MT): '{clip_query}'")
     print(f"-> Vật thể bắt buộc trích xuất: {required_objects}")
+    if proper_nouns:
+        print(f"-> Danh từ riêng phát hiện: {proper_nouns}")
     
     return {
         "clip_query": clip_query,
-        "required_objects": required_objects
+        "required_objects": required_objects,
+        "proper_nouns": proper_nouns
     }

@@ -5,7 +5,7 @@ Chạy search từ command line.
 
 Usage:
     # Chạy single query (Bây giờ sẽ tự động dùng SigLIP + Florence-2 + OCR)
-    python run_search.py --query "cặp khỉ sinh đôi, khỉ, sinh đôi" --type kis --show-images --show-k 10
+    python run_search.py --query "đoàn người đua xe đạp về đích ở Tam Kì, Quảng Nam" --type kis --show-images --show-k 10
 
     # Chạy từ file JSON
     # python run_search.py --query-file queries.json --output submissions/
@@ -262,6 +262,8 @@ class FlorenceKISSearcher:
         parsed_query_data = analyze_query_offline_mt(raw_query)
         clip_query = parsed_query_data["clip_query"]
         required_objects = parsed_query_data["required_objects"]
+        proper_nouns = parsed_query_data.get("proper_nouns", [])
+        has_proper_nouns = len(proper_nouns) > 0
 
         text_inputs = self.siglip_processor(
             text=[clip_query], padding="max_length", return_tensors="pt"
@@ -335,15 +337,43 @@ class FlorenceKISSearcher:
         # --- Merge 2 kênh ---
         all_candidates = siglip_candidates + ocr_only_hits
 
+        import unicodedata
+        import re
+        raw_q_norm = ''.join(c for c in unicodedata.normalize('NFD', raw_query.lower()) if unicodedata.category(c) != 'Mn')
+        raw_q_norm = raw_q_norm.replace("đ", "d")
+        raw_q_norm = re.sub(r'[^\w\s]', '', raw_q_norm)
+        
+        text_phrases = [" co chu ", " ban tin ", " thong bao ", " tieu de ", " van ban ", " hien chu ", " dong chu ", " chu ", " bien so ", " bien bao "]
+        is_text_heavy = any(p in f" {raw_q_norm} " for p in text_phrases)
+
         # Pre-ranking: SigLIP + OCR
+        # Nếu query tìm chữ hoặc có danh từ riêng (địa danh), cho OCR can thiệp vào pre-ranking
+        if is_text_heavy:
+            ocr_weight = 0.5
+        elif has_proper_nouns:
+            ocr_weight = 0.3  # Danh từ riêng cần OCR xác minh nhưng ít hơn query tìm chữ thuần
+        else:
+            ocr_weight = 0.0
+        
         for c in all_candidates:
-            c["pre_score"] = c["clip_score"] + (c["ocr_score"] * 0.5)
+            c["pre_score"] = c["clip_score"] + (c["ocr_score"] * ocr_weight)
         all_candidates.sort(key=lambda x: x["pre_score"], reverse=True)
         top_candidates = all_candidates[: self.max_answers]
 
         # Florence-2 re-ranking
+        # Lọc bỏ danh từ riêng khỏi danh sách object gửi cho Florence
+        # vì Florence không thể nhìn hình mà biết đó là "Đắk Lắk" hay "Hà Nội"
+        # Danh từ riêng sẽ do OCR chịu trách nhiệm xác minh
+        if has_proper_nouns:
+            proper_nouns_lower = [p.lower() for p in proper_nouns]
+            florence_objects = [obj for obj in required_objects if not any(pn in obj for pn in proper_nouns_lower)]
+            if not florence_objects:
+                florence_objects = required_objects  # Fallback nếu lọc hết
+        else:
+            florence_objects = required_objects
+        
         cand_paths = [c["image_path"] for c in top_candidates]
-        florence_scores = self.get_florence_scores_batch(cand_paths, required_objects)
+        florence_scores = self.get_florence_scores_batch(cand_paths, florence_objects)
 
         # Final scoring
         scored_results = []
@@ -368,18 +398,14 @@ class FlorenceKISSearcher:
                 final_score = max(final_score, floor)
             elif ocr_score >= 0.3:
                 final_score += 0.2
-
-            scored_results.append(
-                {
-                    "video_id": cand["video_id"],
-                    "frame_id": cand["frame_id"],
-                    "image_path": cand["image_path"],
-                    "score": final_score,
-                    "clip": clip_score,
-                    "flo": florence_score,
-                    "ocr": ocr_score,
-                }
-            )
+                
+            scored_results.append({
+                "video_id": cand["video_id"],
+                "frame_id": cand["frame_id"],
+                "image_path": cand["image_path"],
+                "score": final_score,
+                "clip": clip_score, "flo": florence_score, "ocr": ocr_score
+            })
 
         scored_results.sort(key=lambda x: x["score"], reverse=True)
         return scored_results[: self.max_answers]
