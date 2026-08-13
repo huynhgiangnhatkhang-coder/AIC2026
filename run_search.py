@@ -1,25 +1,31 @@
 """
 AIC 2026 Baseline — CLI Entry Point (UPDATED: SigLIP + Florence-2 + OCR)
 ======================================
-Chạy search từ command line.
+Công cụ tìm kiếm video chuyên sâu. Mặc định tự động hiển thị Grid 10 ảnh kết quả.
 
-Usage:
-    # Chạy single query (Bây giờ sẽ tự động dùng SigLIP + Florence-2 + OCR)
-    python run_search.py --query "đoàn người đua xe đạp về đích ở Tam Kì, Quảng Nam" --type kis --show-images --show-k 10
+HƯỚNG DẪN SỬ DỤNG:
 
-    # Chạy từ file JSON
-    # python run_search.py --query-file queries.json --output submissions/
+    # 1. Chế độ Mặc định (Tự động chạy và hiển thị 3 Grid: Thuần Hình / Thuần Chữ / Hỗn hợp để so sánh)
+    python run_search.py --query "đoàn người đua xe đạp về đích ở Tam Kì, Quảng Nam"
 
-    # Q&A
+    # 2. Chế độ Thuần Chữ (Chỉ dùng OCR - Rất nhanh, lý tưởng để tìm số nhà, địa danh, chữ trên áo)
+    python run_search.py --query "Tam Kì" --search-mode text
+
+    # 3. Chế độ Thuần Hình Ảnh (SigLIP + Florence - Lờ đi các chữ cái gây nhiễu, lý tưởng tìm sự kiện)
+    python run_search.py --query "đoàn người đua xe đạp về đích" --search-mode visual
+
+    # 4. Chạy theo batch từ file JSON để nộp bài (Sẽ tự động chọn hybrid, tắt popup ảnh)
+    python run_search.py --query-file queries.json --output submissions/
+
+    # 5. Tìm kiếm Q&A (Video Question Answering)
     python run_search.py --query "cảnh bữa tiệc" --question "Váy của cô gái màu gì?" --type qa
-
-    # TRAKE
-    python run_search.py --events "giậm nhảy" "bay qua xà" "tiếp đất" --type trake
 """
 
 import sys
 import os
+import re
 import json
+import unicodedata
 import argparse
 from pathlib import Path
 import yaml
@@ -89,7 +95,7 @@ class FlorenceKISSearcher:
         )
         self.florence_model = (
             AutoModelForCausalLM.from_pretrained(
-                FLORENCE_MODEL_NAME, trust_remote_code=True, attn_implementation="spda"
+                FLORENCE_MODEL_NAME, trust_remote_code=True, attn_implementation="sdpa"
             )
             .to(self.device)
             .eval()
@@ -192,25 +198,35 @@ class FlorenceKISSearcher:
         if not ocr_text:
             return 0.0
 
-        import unicodedata
 
-        # Bỏ dấu tiếng Việt để match tốt hơn vì ocr_text đôi khi không dấu hoặc bị nhiễu
         search_text_no_accents = "".join(
-            c
-            for c in unicodedata.normalize("NFD", search_text.lower())
-            if unicodedata.category(c) != "Mn"
-        )
-        search_text_no_accents = search_text_no_accents.replace("đ", "d")
-
-        search_keywords = search_text_no_accents.split()
-        if not search_keywords:
+            c for c in unicodedata.normalize("NFD", search_text.lower()) if unicodedata.category(c) != "Mn"
+        ).replace("đ", "d")
+        search_phrase = re.sub(r'[^\w\s]', ' ', search_text_no_accents)
+        search_phrase = re.sub(r'\s+', ' ', search_phrase).strip()
+        if not search_phrase:
             return 0.0
-        matched = sum(1 for kw in search_keywords if kw in ocr_text)
-        return matched / len(search_keywords)
+
+        ocr_text_no_accents = "".join(
+            c for c in unicodedata.normalize("NFD", ocr_text.lower()) if unicodedata.category(c) != "Mn"
+        ).replace("đ", "d")
+        ocr_norm = re.sub(r'[^\w\s]', ' ', ocr_text_no_accents)
+        ocr_norm = re.sub(r'\s+', ' ', ocr_norm).strip()
+
+        # Kiểm tra khớp nguyên cụm từ (có dấu cách) hoặc cụm từ viết liền (không dấu cách) với word boundary
+        if re.search(rf'\b{re.escape(search_phrase)}\b', ocr_norm) or \
+           re.search(rf'\b{re.escape(search_phrase.replace(" ", ""))}\b', ocr_norm):
+            return 1.0
+            
+        # Nếu không khớp cụm từ, fall back đếm số từ rời rạc nhưng giảm 50% điểm (tối đa 0.5)
+        # để tránh false positive khi các từ nằm cách xa nhau (vd: "tam... ki")
+        keywords = search_phrase.split()
+        matched = sum(1 for kw in keywords if re.search(rf'\b{re.escape(kw)}\b', ocr_norm))
+        return (matched / len(keywords)) * 0.5
 
     def _ocr_search(self, raw_query, existing_keys):
         """Quét toàn bộ OCR database tìm frame có chữ khớp với query (độc lập với SigLIP)."""
-        import unicodedata
+
 
         if not self.ocr_data or not raw_query:
             return []
@@ -221,18 +237,34 @@ class FlorenceKISSearcher:
             if unicodedata.category(c) != "Mn"
         )
         search_text = search_text.replace("đ", "d")
-        keywords = search_text.split()
-        if not keywords:
+        search_phrase = re.sub(r'[^\w\s]', ' ', search_text)
+        search_phrase = re.sub(r'\s+', ' ', search_phrase).strip()
+        if not search_phrase:
             return []
+            
+        keywords = search_phrase.split()
 
         ocr_hits = []
         for key, ocr_text in self.ocr_data.items():
-            # Bỏ qua nếu đã có trong danh sách SigLIP
             if key in existing_keys:
                 continue
-            matched = sum(1 for kw in keywords if kw in ocr_text.lower())
-            ocr_score = matched / len(keywords)
-            if ocr_score >= 0.3:  # Tối thiểu 30% từ khóa khớp
+                
+            ocr_text_no_accents = "".join(
+                c for c in unicodedata.normalize("NFD", ocr_text.lower()) if unicodedata.category(c) != "Mn"
+            ).replace("đ", "d")
+            ocr_norm = re.sub(r'[^\w\s]', ' ', ocr_text_no_accents)
+            ocr_norm = re.sub(r'\s+', ' ', ocr_norm).strip()
+            
+            # Ưu tiên khớp nguyên cụm
+            if re.search(rf'\b{re.escape(search_phrase)}\b', ocr_norm) or \
+               re.search(rf'\b{re.escape(search_phrase.replace(" ", ""))}\b', ocr_norm):
+                ocr_score = 1.0
+            else:
+                matched = sum(1 for kw in keywords if re.search(rf'\b{re.escape(kw)}\b', ocr_norm))
+                # Phạt 50% điểm nếu các từ khóa bị tách rời, tránh false positive
+                ocr_score = (matched / len(keywords)) * 0.5
+                
+            if ocr_score > 0.5:  # Tối thiểu phải lớn hơn 0.5 (nghĩa là phải có exact phrase match, hoặc cụm rất dài)
                 # Parse video_id và frame_id từ key, ví dụ: Keyframes_L22/keyframes/L22_V002/209.jpg
                 parts = key.replace("\\", "/").split("/")
                 if len(parts) >= 2:
@@ -258,15 +290,46 @@ class FlorenceKISSearcher:
         ocr_hits.sort(key=lambda x: x["ocr_score"], reverse=True)
         return ocr_hits[:200]  # Giới hạn 200 kết quả OCR
 
-    def search(self, raw_query):
+    def search(self, raw_query, search_mode="hybrid"):
+        if search_mode == "text":
+            print("\n[Search Mode] Thuần Chữ (OCR-only). Bỏ qua SigLIP/Florence.")
+            ocr_only_hits = self._ocr_search(raw_query, set())
+            if ocr_only_hits:
+                print(f"[OCR Search] Tìm thấy {len(ocr_only_hits)} frame khớp chữ.")
+            for c in ocr_only_hits:
+                c["score"] = c["ocr_score"]
+                c["clip"] = 0.0
+                c["flo"] = 0.0
+                c["ocr"] = c["ocr_score"]
+            return ocr_only_hits[:self.max_answers]
+
         parsed_query_data = analyze_query_offline_mt(raw_query)
         clip_query = parsed_query_data["clip_query"]
         required_objects = parsed_query_data["required_objects"]
         proper_nouns = parsed_query_data.get("proper_nouns", [])
         has_proper_nouns = len(proper_nouns) > 0
 
+        # Tạo query "thuần hình ảnh" cho SigLIP bằng cách loại bỏ danh từ riêng
+        # SigLIP không thể nhìn hình mà biết đó là "Tam Kì" hay "Quảng Nam"
+        # nên giữ lại chỉ làm nhiễu, ví dụ: "Bicycle racers at Tam Kì, Quảng Nam" -> "Bicycle racers"
+        siglip_query = clip_query
+        if has_proper_nouns:
+            for pn in proper_nouns:
+                pn_clean = pn.rstrip(',')
+                siglip_query = re.sub(r'(?i)\b' + re.escape(pn_clean) + r'\b[,]?', '', siglip_query)
+            # Xóa giới từ thừa sau khi loại danh từ riêng
+            siglip_query = re.sub(r'\b(at|in|on|from|near|of)\s*$', '', siglip_query.strip())
+            siglip_query = re.sub(r'\b(at|in|on|from|near|of)\s*,', ',', siglip_query)
+            siglip_query = re.sub(r',\s*,', ',', siglip_query)
+            siglip_query = re.sub(r',\s*$', '', siglip_query)
+            siglip_query = re.sub(r'\s+', ' ', siglip_query).strip()
+            if siglip_query:
+                print(f"-> SigLIP visual query: '{siglip_query}'")
+            else:
+                siglip_query = clip_query  # Fallback
+
         text_inputs = self.siglip_processor(
-            text=[clip_query], padding="max_length", return_tensors="pt"
+            text=[siglip_query], padding="max_length", return_tensors="pt"
         ).to(self.device)
         with torch.no_grad():
             text_features = self.siglip_model.get_text_features(**text_inputs)
@@ -318,7 +381,7 @@ class FlorenceKISSearcher:
             if image_path:
                 rel_path = os.path.relpath(image_path, self.keyframes_dir)
                 existing_ocr_keys.add(rel_path)
-                ocr_score = self.get_ocr_score(rel_path, raw_query)
+                ocr_score = 0.0 if search_mode == "visual" else self.get_ocr_score(rel_path, raw_query)
                 siglip_candidates.append(
                     {
                         "video_id": v_id,
@@ -330,15 +393,17 @@ class FlorenceKISSearcher:
                 )
 
         # --- Kênh 2: OCR search độc lập (quét toàn bộ OCR DB) ---
-        ocr_only_hits = self._ocr_search(raw_query, existing_ocr_keys)
-        if ocr_only_hits:
-            print(f"[OCR Search] Tìm thêm {len(ocr_only_hits)} frame từ OCR database")
+        ocr_only_hits = []
+        if search_mode != "visual":
+            ocr_only_hits = self._ocr_search(raw_query, existing_ocr_keys)
+            if ocr_only_hits:
+                print(f"[OCR Search] Tìm thêm {len(ocr_only_hits)} frame từ OCR database")
+        else:
+            print("[Search Mode] Thuần Hình Ảnh (Visual-only). Bỏ qua OCR.")
 
         # --- Merge 2 kênh ---
         all_candidates = siglip_candidates + ocr_only_hits
 
-        import unicodedata
-        import re
         raw_q_norm = ''.join(c for c in unicodedata.normalize('NFD', raw_query.lower()) if unicodedata.category(c) != 'Mn')
         raw_q_norm = raw_q_norm.replace("đ", "d")
         raw_q_norm = re.sub(r'[^\w\s]', '', raw_q_norm)
@@ -348,7 +413,9 @@ class FlorenceKISSearcher:
 
         # Pre-ranking: SigLIP + OCR
         # Nếu query tìm chữ hoặc có danh từ riêng (địa danh), cho OCR can thiệp vào pre-ranking
-        if is_text_heavy:
+        if search_mode == "visual":
+            ocr_weight = 0.0
+        elif is_text_heavy:
             ocr_weight = 0.5
         elif has_proper_nouns:
             ocr_weight = 0.3  # Danh từ riêng cần OCR xác minh nhưng ít hơn query tìm chữ thuần
@@ -381,23 +448,41 @@ class FlorenceKISSearcher:
             clip_score = cand["clip_score"]
             ocr_score = cand["ocr_score"]
 
-            # Base score = weighted sum of 3 models
-            final_score = (
-                (0.6 * clip_score) + (0.3 * florence_score) + (0.1 * ocr_score)
-            )
+            # OCR-only candidates (SigLIP=0): Florence hay ảo tưởng vì không có bằng chứng hình ảnh
+            # Giảm trọng số Florence xuống 50% cho những frame này
+            effective_florence = florence_score * 0.5 if clip_score == 0.0 else florence_score
 
-            # OCR override: chữ trên màn hình là bằng chứng mạnh nhất
-            # Khi OCR score rất cao, đặt sàn điểm (floor) để đảm bảo
-            # frame có text luôn lên top, bất kể visual model có nhận diện hay không.
-            if ocr_score >= 0.6:
-                # Sàn = 0.95 + bonus theo mức OCR (tối đa ~1.05)
-                floor = 0.90 + ocr_score * 0.15
-                final_score = max(final_score, floor)
-            elif ocr_score >= 0.5:
-                floor = 0.80 + ocr_score * 0.10
-                final_score = max(final_score, floor)
-            elif ocr_score >= 0.3:
-                final_score += 0.2
+            # Base score = weighted sum of 3 models (cố định cho mọi loại query)
+            if search_mode == "visual":
+                final_score = (0.7 * clip_score) + (0.3 * effective_florence)
+            else:
+                final_score = (0.6 * clip_score) + (0.3 * effective_florence) + (0.1 * ocr_score)
+
+                # OCR bonus: phân loại query 3 tầng
+                if is_text_heavy:
+                    # Query tìm chữ: OCR là bằng chứng mạnh nhất, cho phép override
+                    if ocr_score >= 0.6:
+                        floor = 0.90 + ocr_score * 0.15
+                        final_score = max(final_score, floor)
+                    elif ocr_score >= 0.5:
+                        floor = 0.80 + ocr_score * 0.10
+                        final_score = max(final_score, floor)
+                    elif ocr_score >= 0.4:
+                        final_score += 0.3
+                elif has_proper_nouns:
+                    # Query có danh từ riêng: thưởng điểm CHỈ KHI có cả bằng chứng hình ảnh VÀ text
+                    # Tránh frame rác (SigLIP=0) chiếm top chỉ nhờ text match
+                    if clip_score > 0 and ocr_score >= 0.3:
+                        # Bonus tỉ lệ thuận với OCR score — frame có text đúng sẽ được đẩy lên
+                        final_score += ocr_score * 0.5
+                else:
+                    # Query thuần hình ảnh: OCR chỉ là điểm thưởng nhỏ
+                    if ocr_score >= 0.8:
+                        final_score += 0.10
+                    elif ocr_score >= 0.5:
+                        final_score += 0.05
+                    elif ocr_score >= 0.3:
+                        final_score += 0.02
                 
             scored_results.append({
                 "video_id": cand["video_id"],
@@ -419,7 +504,7 @@ class FlorenceKISSearcher:
         return formatted
 
 
-def show_top_k_images(results, k=5, query_text=""):
+def show_top_k_images(results, k=5, query_text="", output_path="search_results_preview.jpg"):
     """Hiển thị top-k kết quả dưới dạng lưới ảnh."""
     try:
         from PIL import Image as PILImage, ImageDraw, ImageFont
@@ -483,7 +568,6 @@ def show_top_k_images(results, k=5, query_text=""):
         draw.text((x + 4, y + thumb_h + 2), label, fill=(200, 255, 200))
 
     # Lưu và mở
-    output_path = "search_results_preview.jpg"
     grid.save(output_path, quality=90)
     print(f"\n[Preview] Đã lưu ảnh kết quả: {output_path}")
 
@@ -587,18 +671,36 @@ def run_single_query(components: dict, args, cfg: dict):
     qtype = args.type.lower()
 
     if qtype in ("kis", "textual_kis"):
-        results = components["kis"].search(args.query)
-        print("\n=== KẾT QUẢ TÌM KIẾM CHÍNH THỨC ===")
-        for i, r in enumerate(results[:5]):
-            print(
-                f"▶ {r['video_id']} - {r['frame_id']} | Tổng: {r['score']:.4f} (SigLIP: {r['clip']:.4f} | Florence: {r['flo']:.4f} | OCR: {r['ocr']:.4f})"
-            )
-        formatted = components["kis"].format_submission(results)
+        search_mode = getattr(args, "search_mode", "all")
+        modes_to_run = ["visual", "text", "hybrid"] if search_mode == "all" else [search_mode]
+        
+        all_results = []
+        show_k = getattr(args, "show_k", 10)
+        show_images = getattr(args, "show_images", True)
+        
+        for mode in modes_to_run:
+            if len(modes_to_run) > 1:
+                print(f"\n=============================================")
+                print(f" Đang chạy tìm kiếm chế độ: {mode.upper()}")
+                print(f"=============================================")
+                
+            results = components["kis"].search(args.query, search_mode=mode)
+            
+            print(f"\n=== KẾT QUẢ TÌM KIẾM ({mode.upper()}) ===")
+            for i, r in enumerate(results[:show_k]):
+                print(
+                    f"▶ {r['video_id']} - {r['frame_id']} | Tổng: {r['score']:.4f} (SigLIP: {r['clip']:.4f} | Florence: {r['flo']:.4f} | OCR: {r['ocr']:.4f})"
+                )
+            
+            if show_images:
+                mode_label = f"{args.query} [{mode.upper()}]" if search_mode == "all" else args.query
+                out_name = f"search_results_preview_{mode}.jpg" if search_mode == "all" else "search_results_preview.jpg"
+                show_top_k_images(results, k=show_k, query_text=mode_label, output_path=out_name)
+                
+            all_results.append(results)
 
-        # Hiển thị ảnh nếu --show-images
-        if getattr(args, "show_images", False):
-            show_k = getattr(args, "show_k", 5)
-            show_top_k_images(results, k=show_k, query_text=args.query)
+        # Dùng kết quả cuối cùng (hybrid) để format (nếu cần lưu file)
+        formatted = components["kis"].format_submission(all_results[-1])
 
     elif qtype in ("qa", "vqa"):
         results = components["qa"].search(
@@ -644,7 +746,10 @@ def run_batch_queries(components: dict, args, cfg: dict):
 
         try:
             if qtype in ("textual_kis", "kis"):
-                results = components["kis"].search(q.get("query_text", ""))
+                search_mode = getattr(args, "search_mode", "hybrid")
+                if search_mode == "all":
+                    search_mode = "hybrid"  # Trong chế độ batch, mặc định dùng hybrid
+                results = components["kis"].search(q.get("query_text", ""), search_mode=search_mode)
             elif qtype in ("qa", "vqa"):
                 results = components["qa"].search(
                     query=q.get("retrieval_query", q.get("query_text", "")),
@@ -708,12 +813,19 @@ def main():
     parser.add_argument("--evaluate", action="store_true")
     parser.add_argument("--top-k", type=int, default=100)
     parser.add_argument(
-        "--show-images",
-        action="store_true",
-        help="Hiển thị top-k ảnh kết quả sau khi search",
+        "--search-mode",
+        choices=["all", "hybrid", "visual", "text"],
+        default="all",
+        help="Chế độ tìm kiếm: all (chạy cả 3), hybrid (kết hợp), visual (chỉ SigLIP), text (chỉ OCR)",
     )
     parser.add_argument(
-        "--show-k", type=int, default=5, help="Số ảnh hiển thị (mặc định 5)"
+        "--show-images",
+        action="store_true",
+        default=True,
+        help="Hiển thị top-k ảnh kết quả sau khi search (Mặc định: True)",
+    )
+    parser.add_argument(
+        "--show-k", type=int, default=10, help="Số ảnh hiển thị (mặc định 10)"
     )
 
     args = parser.parse_args()

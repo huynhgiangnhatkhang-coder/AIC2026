@@ -109,7 +109,7 @@ def analyze_query_offline_mt(vietnamese_query):
             required_objects.append(obj)
 
     print(f"-> Câu tiếng Việt đã lọc: '{cleaned_query}'")
-    print(f"-> Dịch sang tiếng Anh (Opus-MT): '{clip_query}'")
+    print(f"-> Dịch sang tiếng Anh (envit5): '{clip_query}'")
     print(f"-> Vật thể bắt buộc trích xuất: {required_objects}")
     if proper_nouns:
         print(f"-> Danh từ riêng phát hiện: {proper_nouns}")

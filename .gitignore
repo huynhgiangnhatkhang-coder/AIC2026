@@ -6,7 +6,7 @@
 /indexes/
 /output/
 search_output.log
-search_results_preview.jpg
+*.jpg
 
 # Python
 __pycache__/
