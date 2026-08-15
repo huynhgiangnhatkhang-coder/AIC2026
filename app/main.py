@@ -4,10 +4,12 @@ AIC 2026 Baseline — FastAPI REST API
 Web service cho phép gửi query qua HTTP và nhận kết quả JSON.
 
 Endpoints:
-  POST /search/kis      — Textual KIS
-  POST /search/qa       — Q&A / VQA
-  POST /search/trake    — TRAKE temporal
-  GET  /health          — Health check
+  POST /search/kis                — Textual KIS
+  POST /search/qa                 — Q&A / VQA
+  POST /search/trake              — TRAKE temporal
+  GET  /frames/{video_id}/{frame_id}  — Phục vụ ảnh keyframe (image/jpeg|png)
+  POST /frames/batch              — Lấy nhiều ảnh keyframe (base64 data URL)
+  GET  /health                    — Health check
 
 Usage:
   uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -16,8 +18,11 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import base64
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import yaml
@@ -100,9 +105,7 @@ def get_kis_searcher() -> TextualKISSearcher:
     if _kis_searcher is None:
         _kis_searcher = TextualKISSearcher(
             retriever=get_hybrid_retriever(),
-            objects_dir=str(
-                os.path.join(cfg["data"]["root"], cfg["data"]["objects_dir"])
-            ),
+            keyframes_dir=str(cfg["data"].get("keyframes_root", "DATASET")),
             max_answers=cfg["retrieval"]["final_top_k"]
         )
     return _kis_searcher
@@ -130,6 +133,33 @@ def get_trake_searcher() -> TRAKESearcher:
             max_answers=cfg["retrieval"]["final_top_k"]
         )
     return _trake_searcher
+
+
+def _resolve_frame_file(video_id: str, frame_id: int) -> Optional[str]:
+    """
+    Giải quyết (video_id, frame_id) → đường dẫn file ảnh keyframe.
+
+    Ưu tiên tra cứu từ các index đã build (frame_map.json, ocr_database.json,
+    Milvus) trước, sau đó mới dùng heuristic trên filesystem.
+    """
+    from src.frame_paths import resolve_frame_path
+
+    path = resolve_frame_path(video_id, frame_id, cfg)
+    if path is not None:
+        return path
+
+    # Fallback: lấy filename chính xác từ index vector đã build (Milvus)
+    try:
+        retriever = get_vector_retriever()
+        get_fn = getattr(retriever, "get_frame_filename", None)
+        if get_fn is not None:
+            fn = get_fn(video_id, frame_id)
+            if fn:
+                return resolve_frame_path(video_id, frame_id, cfg, exact_filename=fn)
+    except Exception:
+        pass
+
+    return None
 
 
 # ── FastAPI App ────────────────────────────────────────────
@@ -175,12 +205,29 @@ class AnswerItem(BaseModel):
     answer: Optional[str] = None
     score: float
     formatted: str  # chuỗi nộp bài
+    image_url: Optional[str] = Field(None, description="URL lấy ảnh keyframe, vd. /frames/L21_V001/1")
 
 
 class SearchResponse(BaseModel):
     query_type: str
     num_results: int
     answers: List[AnswerItem]
+
+
+class FrameRequest(BaseModel):
+    video_id: str = Field(..., description="Mã video, ví dụ: L21_V001 hoặc L21_V001.mp4")
+    frame_id: int = Field(..., ge=1, description="Số thứ tự frame")
+
+
+class FrameBatchRequest(BaseModel):
+    frames: List[FrameRequest] = Field(..., min_length=1)
+
+
+class FrameBatchItem(BaseModel):
+    video_id: str
+    frame_id: int
+    found: bool
+    data_url: Optional[str] = None
 
 
 # ── Endpoints ─────────────────────────────────────────────
@@ -228,7 +275,8 @@ def search_kis(req: KISRequest):
                 video_id=r["video_id"],
                 frame_id=r["frame_id"],
                 score=r.get("score", 0.0),
-                formatted=f"{r['video_id']}, {r['frame_id']}"
+                formatted=f"{r['video_id']}, {r['frame_id']}",
+                image_url=f"/frames/{r['video_id']}/{r['frame_id']}"
             ))
 
         return SearchResponse(
@@ -263,7 +311,8 @@ def search_qa(req: QARequest):
                 frame_id=r["frame_id"],
                 answer=r.get("answer", ""),
                 score=r.get("score", 0.0),
-                formatted=f"{r['video_id']}, {r['frame_id']}, {r.get('answer', '')}"
+                formatted=f"{r['video_id']}, {r['frame_id']}, {r.get('answer', '')}",
+                image_url=f"/frames/{r['video_id']}/{r['frame_id']}"
             ))
 
         return SearchResponse(
@@ -294,12 +343,18 @@ def search_trake(req: TRAKERequest):
         answers = []
         for r in results[:req.top_k]:
             fids = r.get("frame_ids", [])
+            # TRAKE: frame_ids = [before, current, after, ...]; middle là frame hiện tại
+            cur = None
+            if fids:
+                mid = fids[len(fids) // 2]
+                cur = mid if mid is not None else next((x for x in fids if x is not None), None)
             answers.append(AnswerItem(
                 rank=r["rank"],
                 video_id=r["video_id"],
                 frame_ids=fids,
                 score=r.get("total_score", 0.0),
-                formatted=f"{r['video_id']}, " + ", ".join(str(f) for f in fids)
+                formatted=f"{r['video_id']}, " + ", ".join(str(f) for f in fids),
+                image_url=(f"/frames/{r['video_id']}/{cur}" if cur is not None else None)
             ))
 
         return SearchResponse(
@@ -309,6 +364,75 @@ def search_trake(req: TRAKERequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/frames/{video_id}/{frame_id}", summary="Phục vụ ảnh keyframe")
+def get_frame(video_id: str, frame_id: int):
+    """
+    Trả về ảnh keyframe cho (video_id, frame_id) — dùng trực tiếp làm `<img src>`.
+
+    Ví dụ:
+      GET /frames/L21_V001/1
+      GET /frames/L21_V001.mp4/1
+    """
+    path = _resolve_frame_file(video_id, frame_id)
+    if path is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Không tìm thấy frame: {video_id}, {frame_id}"
+        )
+
+    ext = os.path.splitext(path)[1].lower()
+    media_type = (
+        "image/jpeg" if ext in (".jpg", ".jpeg")
+        else "image/png" if ext == ".png"
+        else "application/octet-stream"
+    )
+    return FileResponse(
+        path,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.post("/frames/batch", summary="Lấy nhiều ảnh keyframe (base64 data URL)")
+def get_frames_batch(req: FrameBatchRequest):
+    """
+    Nhận danh sách (video_id, frame_id), trả về từng ảnh dưới dạng data URL.
+
+    Body:
+      {"frames": [{"video_id": "L21_V001", "frame_id": 1}, ...]}
+    """
+    items = []
+    for f in req.frames:
+        path = _resolve_frame_file(f.video_id, f.frame_id)
+        if path is None:
+            items.append(FrameBatchItem(
+                video_id=f.video_id, frame_id=f.frame_id, found=False
+            ))
+            continue
+
+        ext = os.path.splitext(path)[1].lower()
+        media_type = (
+            "image/jpeg" if ext in (".jpg", ".jpeg")
+            else "image/png" if ext == ".png"
+            else "application/octet-stream"
+        )
+        with open(path, "rb") as fh:
+            b64 = base64.b64encode(fh.read()).decode("ascii")
+
+        items.append(FrameBatchItem(
+            video_id=f.video_id,
+            frame_id=f.frame_id,
+            found=True,
+            data_url=f"data:{media_type};base64,{b64}",
+        ))
+
+    return {
+        "num_requests": len(req.frames),
+        "num_found": sum(1 for i in items if i.found),
+        "frames": items,
+    }
 
 
 @app.post("/submit")

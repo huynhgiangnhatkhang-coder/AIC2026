@@ -311,6 +311,35 @@ class MilvusRetriever:
             print(f"[MilvusRetriever] get_video_ids error: {e}")
             return []
 
+    def get_frame_filename(self, video_id: str, frame_id: int) -> Optional[str]:
+        """
+        Tra cứu filename chính xác của một frame trong index (nếu được lưu).
+
+        Args:
+            video_id: "L21_V001.mp4" hoặc "L21_V001"
+            frame_id: số thứ tự frame
+
+        Returns:
+            str filename (vd. "069.jpg") nếu index có lưu field frame_filename,
+            ngược lại None.
+        """
+        try:
+            hits = self._client.query(
+                collection_name=self.collection_name,
+                filter=f"video_id == '{video_id}' and frame_id == {int(frame_id)}",
+                output_fields=["video_id", "frame_id", "frame_filename"],
+                limit=1,
+            )
+        except Exception as e:
+            print(f"[MilvusRetriever] get_frame_filename error: {e}")
+            return None
+
+        for hit in hits:
+            fn = hit.get("frame_filename")
+            if fn:
+                return fn
+        return None
+
     def close(self):
         """Giải phóng collection khỏi memory."""
         if self._client:

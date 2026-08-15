@@ -11,7 +11,6 @@ Pipeline (giống AIC2026/search.py):
 
 Format nộp: video_id, frame_id
 """
-import os
 from typing import List, Dict, Optional
 
 import torch
@@ -140,46 +139,15 @@ class TextualKISSearcher:
         """
         Tìm đường dẫn tới file ảnh keyframe theo cấu trúc của BTC AIC:
           <keyframes_dir>/Keyframes_<batch>/keyframes/<video_folder>/<frame_id>.jpg
+          hoặc <keyframes_dir>/<video_folder>/<frame_id>.jpg
 
         Hỗ trợ nhiều định dạng tên frame: 1.jpg, 001.jpg, 0001.jpg, 00001.jpg, 000001.jpg
         và cả .png.
         """
-        video_folder = video_id.replace(".mp4", "")
-        batch_prefix = video_folder.split("_")[0]           # VD: "L21"
-        batch_folder_name = f"Keyframes_{batch_prefix}"     # VD: "Keyframes_L21"
-
-        possible_formats = [
-            f"{frame_id}.jpg",
-            f"{frame_id:03d}.jpg",
-            f"{frame_id:04d}.jpg",
-            f"{frame_id:05d}.jpg",
-            f"{frame_id:06d}.jpg",
-            f"{frame_id}.png",
-            f"{frame_id:04d}.png",
-        ]
-
-        for fmt in possible_formats:
-            # 1. Cấu trúc chuẩn BTC (có thêm thư mục Keyframes_L21/keyframes/)
-            path_btc = os.path.join(
-                self.keyframes_dir,
-                batch_folder_name,
-                "keyframes",
-                video_folder,
-                fmt
-            )
-            if os.path.exists(path_btc):
-                return path_btc
-                
-            # 2. Cấu trúc phẳng (trực tiếp keyframes_dir/L21_V001/)
-            path_flat = os.path.join(
-                self.keyframes_dir,
-                video_folder,
-                fmt
-            )
-            if os.path.exists(path_flat):
-                return path_flat
-
-        return None
+        from src.frame_paths import resolve_frame_path
+        return resolve_frame_path(
+            video_id, frame_id, cfg=None, extra_roots=[self.keyframes_dir]
+        )
 
     # ──────────────────────────────────────────
     # SEARCH CHÍNH

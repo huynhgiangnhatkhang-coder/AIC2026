@@ -210,6 +210,41 @@ response = requests.post("http://localhost:8000/search/kis", json={
 print(response.json()["answers"][:5])
 ```
 
+#### 🖼️ Lấy ảnh keyframe về hiển thị trên website
+
+Mỗi answer trong `/search/*` đều kèm field **`image_url`** để render ảnh trực tiếp:
+
+```python
+import requests
+
+resp = requests.post("http://localhost:8000/search/kis", json={
+    "query": "một người đang mở laptop trong phòng họp",
+    "top_k": 5,
+})
+for ans in resp.json()["answers"]:
+    print(ans["rank"], ans["video_id"], ans["frame_id"], "→", ans["image_url"])
+```
+
+Dùng `image_url` trực tiếp trong thẻ `<img>` trên website:
+
+```html
+<img src="/frames/L21_V001/1" alt="Kết quả #1">
+```
+
+- **`GET /frames/{video_id}/{frame_id}`** — trả về chính ảnh keyframe (`image/jpeg` hoặc `image/png`), có hỗ trợ cache (ETag + `Cache-Control`). Chấp nhận cả `L21_V001` lẫn `L21_V001.mp4`.
+- **`POST /frames/batch`** — lấy nhiều ảnh cùng lúc dưới dạng base64 data URL:
+
+```bash
+curl -X POST http://localhost:8000/frames/batch \
+  -H 'Content-Type: application/json' \
+  -d '{"frames":[{"video_id":"L21_V001","frame_id":1},{"video_id":"L21_V001","frame_id":99999}]}'
+# → {"num_requests":2,"num_found":1,"frames":[{"video_id":"L21_V001","frame_id":1,"found":true,"data_url":"data:image/jpeg;base64,..."},{"video_id":"L21_V001","frame_id":99999,"found":false}]}
+```
+
+> **Lưu ý TRAKE:** `frame_ids` của kết quả TRAKE có dạng `[before, current, after, ...]`. `image_url` luôn trỏ tới **frame hiện tại** (middle — luôn tồn tại), còn frame trước/sau có thể là `None`.
+>
+> Đường dẫn ảnh được resolve ưu tiên từ các **index đã build** (`indexes/frame_map.json`, `ocr_database.json`, Milvus) rồi mới fallback heuristic trên filesystem — xem `src/frame_paths.py`.
+
 ---
 
 ## 🔧 Tinh chỉnh thông số

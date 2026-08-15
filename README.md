@@ -122,3 +122,44 @@ python run_search.py \
 
 - Mỗi query: tối đa **100 câu trả lời**
 - Càng đúng ở Top 1, điểm R-Score tổng càng cao.
+
+---
+
+## 🌐 REST API
+
+Chạy server (mặc định cổng 8000):
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+| Endpoint | Mô tả |
+|----------|-------|
+| `GET /health` | Health check |
+| `POST /search/kis` | Textual KIS — tìm theo mô tả văn bản |
+| `POST /search/qa` | Q&A / VQA — tìm + trả lời câu hỏi |
+| `POST /search/trake` | TRAKE — chuỗi sự kiện theo thời gian |
+| `GET /frames/{video_id}/{frame_id}` | Trả về **ảnh keyframe** (image/jpeg hoặc image/png) — dùng trực tiếp làm `<img src>` |
+| `POST /frames/batch` | Lấy nhiều ảnh cùng lúc dưới dạng base64 data URL |
+| `POST /submit` | Nộp bài batch |
+
+### Lấy ảnh keyframe
+
+```bash
+# Ảnh đơn — dùng trực tiếp trong <img> trên website
+curl http://localhost:8000/frames/L21_V001/1 > frame.jpg
+# Cũng chấp nhận video_id có đuôi .mp4
+curl http://localhost:8000/frames/L21_V001.mp4/1 > frame.jpg
+
+# Nhiều ảnh một lúc (base64 data URL)
+curl -X POST http://localhost:8000/frames/batch \
+  -H 'Content-Type: application/json' \
+  -d '{"frames":[{"video_id":"L21_V001","frame_id":1},{"video_id":"L21_V001","frame_id":99999}]}'
+# → {"num_requests":2,"num_found":1,"frames":[{"video_id":"L21_V001","frame_id":1,"found":true,"data_url":"data:image/jpeg;base64,..."},{"video_id":"L21_V001","frame_id":99999,"found":false}]}
+```
+
+Kết quả của `/search/*` đều kèm field `image_url` cho từng answer để frontend render ảnh ngay:
+- Textual KIS / Q&A: `image_url` trỏ tới frame tương ứng (`/frames/{video_id}/{frame_id}`).
+- TRAKE: `frame_ids` = `[before, current, after, ...]`; `image_url` trỏ tới **frame hiện tại** (middle, luôn tồn tại — hai frame trước/sau có thể là `None`).
+
+Đường dẫn ảnh được resolve ưu tiên từ các **index đã build** (`indexes/frame_map.json`, `ocr_database.json`, Milvus) trước, sau đó mới fallback heuristic trên filesystem — xem `src/frame_paths.py`.
