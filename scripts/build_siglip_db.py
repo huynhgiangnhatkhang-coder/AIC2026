@@ -47,6 +47,16 @@ def build_siglip_db(keyframes_dirs, db_path, collection_name,
     with torch.no_grad():
         dummy = processor(images=Image.new("RGB", (224, 224)), return_tensors="pt").to(device)
         dummy_out = model.get_image_features(**dummy)
+        
+        # Trích xuất tensor nếu output là một object thay vì tensor
+        if not isinstance(dummy_out, torch.Tensor):
+            if hasattr(dummy_out, 'image_embeds'):
+                dummy_out = dummy_out.image_embeds
+            elif hasattr(dummy_out, 'pooler_output'):
+                dummy_out = dummy_out.pooler_output
+            else:
+                dummy_out = dummy_out[0]
+                
         embedding_dim = dummy_out.shape[1]
     print(f"[SigLIP] Embedding dim: {embedding_dim}")
 
@@ -102,6 +112,16 @@ def build_siglip_db(keyframes_dirs, db_path, collection_name,
         inputs = processor(images=images, return_tensors="pt", padding=True).to(device)
         with torch.no_grad():
             features = model.get_image_features(**inputs)
+            
+            # Trích xuất tensor nếu output là một object
+            if not isinstance(features, torch.Tensor):
+                if hasattr(features, 'image_embeds'):
+                    features = features.image_embeds
+                elif hasattr(features, 'pooler_output'):
+                    features = features.pooler_output
+                else:
+                    features = features[0]
+                    
             features = features / features.norm(p=2, dim=-1, keepdim=True)
             all_embeddings.append(features.cpu().numpy().astype(np.float32))
 

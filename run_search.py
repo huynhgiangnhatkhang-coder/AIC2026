@@ -28,6 +28,16 @@ import json
 import unicodedata
 import argparse
 from pathlib import Path
+import numpy as np
+# Shim: NumPy 1.24+ đã xóa np.long/np.ulong/np.bool/..., nhưng SciPy/Milvus vẫn dùng
+_NP_SHIMS = {
+    'long': np.int64, 'ulong': np.uint64,
+    'bool': np.bool_, 'int': np.int_, 'float': np.float64,
+    'complex': np.complex128, 'object': np.object_, 'str': np.str_,
+}
+for _attr, _fallback in _NP_SHIMS.items():
+    if not hasattr(np, _attr):
+        setattr(np, _attr, _fallback)
 import yaml
 import torch
 from PIL import Image
@@ -95,7 +105,7 @@ class FlorenceKISSearcher:
         )
         self.florence_model = (
             AutoModelForCausalLM.from_pretrained(
-                FLORENCE_MODEL_NAME, trust_remote_code=True, attn_implementation="sdpa"
+                FLORENCE_MODEL_NAME, trust_remote_code=True
             )
             .to(self.device)
             .eval()
@@ -198,7 +208,6 @@ class FlorenceKISSearcher:
         if not ocr_text:
             return 0.0
 
-
         search_text_no_accents = "".join(
             c for c in unicodedata.normalize("NFD", search_text.lower()) if unicodedata.category(c) != "Mn"
         ).replace("đ", "d")
@@ -213,16 +222,35 @@ class FlorenceKISSearcher:
         ocr_norm = re.sub(r'[^\w\s]', ' ', ocr_text_no_accents)
         ocr_norm = re.sub(r'\s+', ' ', ocr_norm).strip()
 
-        # Kiểm tra khớp nguyên cụm từ (có dấu cách) hoặc cụm từ viết liền (không dấu cách) với word boundary
+        # 1) Khớp nguyên cụm từ đầy đủ
         if re.search(rf'\b{re.escape(search_phrase)}\b', ocr_norm) or \
            re.search(rf'\b{re.escape(search_phrase.replace(" ", ""))}\b', ocr_norm):
             return 1.0
-            
-        # Nếu không khớp cụm từ, fall back đếm số từ rời rạc nhưng giảm 50% điểm (tối đa 0.5)
-        # để tránh false positive khi các từ nằm cách xa nhau (vd: "tam... ki")
+
         keywords = search_phrase.split()
+        n = len(keywords)
+
+        # 2) Sliding window: tìm cụm từ CON liên tiếp dài nhất có trong OCR
+        #    Ví dụ: query = "ban tin ve tai nan giao thong tai dak lak"
+        #           OCR chứa "tai nan giao thong tai dak lak" → khớp 7/10 từ liên tiếp
+        best_sub_ratio = 0.0
+        for win_len in range(n - 1, 1, -1):  # Từ dài đến ngắn (tối thiểu 2 từ)
+            for start in range(n - win_len + 1):
+                sub_phrase = " ".join(keywords[start:start + win_len])
+                if re.search(rf'\b{re.escape(sub_phrase)}\b', ocr_norm) or \
+                   re.search(rf'\b{re.escape(sub_phrase.replace(" ", ""))}\b', ocr_norm):
+                    best_sub_ratio = win_len / n
+                    break
+            if best_sub_ratio > 0:
+                break
+
+        if best_sub_ratio >= 0.5:
+            # Cụm con liên tiếp dài ≥ 50% query → điểm cao (0.6 ~ 0.95)
+            return 0.5 + best_sub_ratio * 0.5
+
+        # 3) Fallback: đếm từ khóa rời rạc, giảm 50% điểm (tối đa 0.5)
         matched = sum(1 for kw in keywords if re.search(rf'\b{re.escape(kw)}\b', ocr_norm))
-        return (matched / len(keywords)) * 0.5
+        return (matched / n) * 0.5
 
     def _ocr_search(self, raw_query, existing_keys):
         """Quét toàn bộ OCR database tìm frame có chữ khớp với query (độc lập với SigLIP)."""
@@ -254,17 +282,34 @@ class FlorenceKISSearcher:
             ).replace("đ", "d")
             ocr_norm = re.sub(r'[^\w\s]', ' ', ocr_text_no_accents)
             ocr_norm = re.sub(r'\s+', ' ', ocr_norm).strip()
-            
+            n = len(keywords)
+
             # Ưu tiên khớp nguyên cụm
             if re.search(rf'\b{re.escape(search_phrase)}\b', ocr_norm) or \
                re.search(rf'\b{re.escape(search_phrase.replace(" ", ""))}\b', ocr_norm):
                 ocr_score = 1.0
             else:
-                matched = sum(1 for kw in keywords if re.search(rf'\b{re.escape(kw)}\b', ocr_norm))
-                # Phạt 50% điểm nếu các từ khóa bị tách rời, tránh false positive
-                ocr_score = (matched / len(keywords)) * 0.5
-                
-            if ocr_score > 0.5:  # Tối thiểu phải lớn hơn 0.5 (nghĩa là phải có exact phrase match, hoặc cụm rất dài)
+                # Sliding window: tìm cụm từ CON liên tiếp dài nhất có trong OCR
+                best_sub_ratio = 0.0
+                for win_len in range(n - 1, 1, -1):
+                    found = False
+                    for start in range(n - win_len + 1):
+                        sub_phrase = " ".join(keywords[start:start + win_len])
+                        if re.search(rf'\b{re.escape(sub_phrase)}\b', ocr_norm) or \
+                           re.search(rf'\b{re.escape(sub_phrase.replace(" ", ""))}\b', ocr_norm):
+                            best_sub_ratio = win_len / n
+                            found = True
+                            break
+                    if found:
+                        break
+
+                if best_sub_ratio >= 0.5:
+                    ocr_score = 0.5 + best_sub_ratio * 0.5
+                else:
+                    matched = sum(1 for kw in keywords if re.search(rf'\b{re.escape(kw)}\b', ocr_norm))
+                    ocr_score = (matched / n) * 0.5
+
+            if ocr_score >= 0.3:  # Hạ threshold để không bỏ lọt partial match mạnh
                 # Parse video_id và frame_id từ key, ví dụ: Keyframes_L22/keyframes/L22_V002/209.jpg
                 parts = key.replace("\\", "/").split("/")
                 if len(parts) >= 2:

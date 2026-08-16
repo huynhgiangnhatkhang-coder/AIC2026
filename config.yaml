@@ -21,14 +21,13 @@ data:
   keyframes_dirs_list:
     - "./DATASET/Keyframes_L21/keyframes"
     - "./DATASET/Keyframes_L22/keyframes"
-    - "./DATASET/Keyframes_L23/keyframes"
 
   keyframes_root: "./DATASET"
 
 index:
   # Milvus Lite Config
   milvus_db_path: "./aic_kis_database_siglip.db"
-  milvus_collection: "./kis_keyframes_siglip"
+  milvus_collection: "kis_keyframes_siglip"
 
   # FAISS (fallback)
   faiss_index_path: "./indexes/clip_faiss.index"
