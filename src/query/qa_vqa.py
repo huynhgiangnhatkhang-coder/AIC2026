@@ -47,24 +47,24 @@ class QASearcher:
         self._vqa_processor = None
 
     def _load_vqa_model(self):
-        """Lazy-load BLIP-2 VQA model."""
+        """Lazy-load Qwen2-VL VQA model."""
         if self._vqa_model is None:
-            from transformers import Blip2Processor, Blip2ForConditionalGeneration
+            from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
             import torch
 
             print(f"[QA] Loading VQA model: {self.vqa_model_name}")
-            self._vqa_processor = Blip2Processor.from_pretrained(self.vqa_model_name)
-            self._vqa_model = Blip2ForConditionalGeneration.from_pretrained(
+            self._vqa_processor = AutoProcessor.from_pretrained(self.vqa_model_name)
+            self._vqa_model = Qwen2VLForConditionalGeneration.from_pretrained(
                 self.vqa_model_name,
                 torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                device_map=self.device
+                device_map="auto"
             )
             self._vqa_model.eval()
             print("[QA] VQA model loaded!")
 
     def _run_vqa(self, image_path: str, question: str) -> Tuple[str, float]:
         """
-        Chạy VQA model trên một ảnh.
+        Chạy VQA model (Qwen2-VL) trên một ảnh.
         
         Returns:
             (answer_text, confidence_score)
@@ -73,37 +73,67 @@ class QASearcher:
 
         import torch
         from PIL import Image
+        from qwen_vl_utils import process_vision_info
 
-        try:
-            image = Image.open(image_path).convert("RGB")
-        except Exception as e:
-            return ("unknown", 0.0)
+        # Định dạng messages chuẩn của Qwen2-VL
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "image": f"file://{image_path}",
+                    },
+                    {"type": "text", "text": question},
+                ],
+            }
+        ]
 
-        # Dùng Q&A prompt cho BLIP-2
-        prompt = f"Question: {question} Answer:"
+        text = self._vqa_processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        image_inputs, video_inputs = process_vision_info(messages)
 
         inputs = self._vqa_processor(
-            images=image,
-            text=prompt,
-            return_tensors="pt"
+            text=[text],
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
         ).to(self.device)
 
         with torch.no_grad():
             outputs = self._vqa_model.generate(
                 **inputs,
-                max_new_tokens=50,
-                num_beams=5,
+                max_new_tokens=128,
                 output_scores=True,
                 return_dict_in_generate=True
             )
 
-        answer = self._vqa_processor.decode(
-            outputs.sequences[0], skip_special_tokens=True
-        ).strip()
+        generated_ids = outputs.sequences
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+        ]
+        
+        answer = self._vqa_processor.batch_decode(
+            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )[0].strip()
 
-        # Confidence từ beam scores (approximation)
-        if hasattr(outputs, "sequences_scores") and outputs.sequences_scores is not None:
-            confidence = float(outputs.sequences_scores[0].exp().item())
+        # Tính confidence score (nếu lấy được token probabilities)
+        if hasattr(outputs, "scores") and outputs.scores:
+            try:
+                # Tính trung bình log_softmax của các token được tạo ra
+                log_probs = []
+                for idx, logits in enumerate(outputs.scores):
+                    token_id = generated_ids_trimmed[0][idx].item()
+                    probs = torch.nn.functional.softmax(logits[0], dim=-1)
+                    log_prob = torch.log(probs[token_id] + 1e-10).item()
+                    log_probs.append(log_prob)
+                avg_log_prob = sum(log_probs) / len(log_probs)
+                import math
+                confidence = math.exp(avg_log_prob)
+            except Exception:
+                confidence = 0.5
         else:
             confidence = 0.5
 

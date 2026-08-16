@@ -33,3 +33,4 @@ aic_kis_database.db/
 clip-features-32-aic25-b1/
 aic_kis_database_siglip.db/
 objects-aic25-b1/
+extracted_gemini_data.json

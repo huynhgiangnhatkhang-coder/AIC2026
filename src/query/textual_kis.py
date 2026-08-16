@@ -17,7 +17,7 @@ import torch
 from PIL import Image
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
 
-from .translate import analyze_query_offline_mt
+from translate import analyze_query_offline_mt
 
 
 class TextualKISSearcher:

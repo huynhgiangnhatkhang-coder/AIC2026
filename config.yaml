@@ -50,7 +50,7 @@ retrieval:
 
 # --- VQA ---
 vqa:
-  model: "Salesforce/blip2-opt-2.7b"
+  model: "Qwen/Qwen2-VL-2B-Instruct"
   device: "cuda"
   top_k_frames: 20
 
