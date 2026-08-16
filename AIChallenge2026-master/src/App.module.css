@@ -1,0 +1,143 @@
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0 22px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 0 16px;
+  flex-wrap: wrap;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 20px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.tabRail {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: sticky;
+  top: 0;
+}
+
+.tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-right: 3px solid transparent;
+  border-left: 3px solid transparent;
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 9px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: left;
+  border-radius: var(--radius-sm);
+}
+
+.tab:hover {
+  color: var(--text);
+  background: var(--bg-elev);
+}
+
+.tabActive {
+  color: var(--accent);
+  border-right-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 40px;
+  min-height: 0;
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0 22px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .app {
+    height: auto;
+  }
+
+  .body {
+    flex-direction: column;
+  }
+
+  .tabRail {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .tabs {
+    flex-direction: row;
+    position: static;
+  }
+
+  .tab {
+    border-bottom: 3px solid transparent;
+    border-right: none;
+    border-left: none;
+    text-align: inherit;
+  }
+
+  .tabActive {
+    border-bottom-color: var(--accent);
+    border-right-color: transparent;
+  }
+}
+
+@media (max-width: 600px) {
+  .app {
+    padding: 0 14px;
+  }
+}

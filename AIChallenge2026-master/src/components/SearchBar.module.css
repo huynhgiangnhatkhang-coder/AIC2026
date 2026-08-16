@@ -1,0 +1,88 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.queryWrap {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 0;
+}
+
+.query {
+  width: 100%;
+  resize: vertical;
+  min-height: 60px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+}
+
+.query:focus {
+  border-color: var(--accent);
+}
+
+.queryFoot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.validate {
+  font-size: 11px;
+}
+
+.countOk {
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+}
+
+.countWarn {
+  font-family: var(--font-mono);
+  color: var(--warn);
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.optValue {
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.filtersNote {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.filtersNote strong {
+  color: var(--accent);
+}

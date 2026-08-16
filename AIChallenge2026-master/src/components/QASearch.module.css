@@ -1,0 +1,91 @@
+.section {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(300px, 40%) 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.leftCol {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rightCol {
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.panel {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+}
+
+.intro {
+  margin: 0 0 14px;
+  color: var(--text-dim);
+}
+
+.field {
+  margin-bottom: 12px;
+}
+
+.query {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font: inherit;
+  resize: vertical;
+}
+
+.query:focus {
+  border-color: var(--accent);
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.checkLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.opt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.optValue {
+  color: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .section {
+    grid-template-columns: 1fr;
+    overflow-y: visible;
+  }
+
+  .rightCol {
+    overflow-y: visible;
+    height: auto;
+  }
+}

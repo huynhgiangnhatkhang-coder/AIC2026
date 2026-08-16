@@ -1,0 +1,43 @@
+.section {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(300px, 40%) 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.leftCol {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rightCol {
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.searchPanel {
+  padding: 18px;
+}
+
+.hints {
+  margin-top: 14px;
+  max-width: 480px;
+}
+
+@media (max-width: 900px) {
+  .section {
+    grid-template-columns: 1fr;
+    overflow-y: visible;
+  }
+
+  .rightCol {
+    overflow-y: visible;
+    height: auto;
+  }
+}

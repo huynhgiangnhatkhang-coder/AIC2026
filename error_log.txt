@@ -1,0 +1,206 @@
+/home/khang/Documents/AIC/AIC2026/run_search.py:39: FutureWarning: In the future `np.long` will be defined as the corresponding NumPy scalar.
+  if not hasattr(np, _attr):
+/home/khang/Documents/AIC/AIC2026/run_search.py:39: FutureWarning: In the future `np.ulong` will be defined as the corresponding NumPy scalar.
+  if not hasattr(np, _attr):
+/home/khang/Documents/AIC/AIC2026/run_search.py:39: FutureWarning: In the future `np.bool` will be defined as the corresponding NumPy scalar.
+  if not hasattr(np, _attr):
+/home/khang/Documents/AIC/AIC2026/run_search.py:39: FutureWarning: In the future `np.object` will be defined as the corresponding NumPy scalar.
+  if not hasattr(np, _attr):
+/home/khang/Documents/AIC/AIC2026/run_search.py:39: FutureWarning: In the future `np.str` will be defined as the corresponding NumPy scalar.
+  if not hasattr(np, _attr):
+Đang tải mô hình dịch thuật Offline (VietAI/envit5-translation)...
+[MilvusRetriever] Kết nối Database: ./aic_kis_database_siglip.db
+[MilvusRetriever] Collection: 'kis_keyframes_siglip' | Records: 16896 | Index: HNSW
+[HybridRetriever] BM25 disabled — running in CLIP-only mode
+Debug: Milvus db_path = aic_kis_database_siglip.db
+[MilvusRetriever] Đang tải Text Encoder: google/siglip-base-patch16-224
+[MilvusRetriever] SigLIP loaded (HF) | device=cuda
+Traceback (most recent call last):
+  File "/home/khang/Documents/AIC/AIC2026/run_search.py", line 899, in <module>
+    main()
+  File "/home/khang/Documents/AIC/AIC2026/run_search.py", line 883, in main
+    run_single_query(components, args, cfg)
+  File "/home/khang/Documents/AIC/AIC2026/run_search.py", line 751, in run_single_query
+    results = components["qa"].search(
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/src/query/qa_vqa.py", line 137, in search
+    raw_results = self.retriever.search(
+                  ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/src/retrieval/hybrid_retriever.py", line 67, in search
+    clip_results = self.clip.search(query, top_k=top_k_clip)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/src/retrieval/milvus_retriever.py", line 218, in search
+    text_vector = self.encode_text(query).tolist()
+                  ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/src/retrieval/milvus_retriever.py", line 173, in encode_text
+    text_features = self._model.get_text_features(**inputs)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/transformers/models/siglip/modeling_siglip.py", line 1089, in get_text_features
+    text_outputs = self.text_model(
+                   ^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/transformers/models/siglip/modeling_siglip.py", line 785, in forward
+    hidden_states = self.embeddings(input_ids=input_ids, position_ids=position_ids)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/transformers/models/siglip/modeling_siglip.py", line 343, in forward
+    embeddings = inputs_embeds + position_embeddings
+                 ~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~
+RuntimeError: The size of tensor a (72) must match the size of tensor b (64) at non-singleton dimension 1
+2026-08-16 18:41:05,065 [WARNING][_recover]: Connection recovery failed (connection_manager.py:676)
+Traceback (most recent call last):
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/decorators.py", line 419, in handler
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/grpc_handler.py", line 1968, in release_collection
+    response = self._stub.ReleaseCollection(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_interceptor.py", line 276, in __call__
+    response, ignored_call = self._with_call(
+                             ^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_interceptor.py", line 331, in _with_call
+    return call.result(), call
+           ^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_channel.py", line 447, in result
+    raise self
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_interceptor.py", line 314, in continuation
+    response, call = self._thunk(new_method).with_call(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_channel.py", line 1182, in with_call
+    return _end_unary_response_blocking(state, call, True, None)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_channel.py", line 999, in _end_unary_response_blocking
+    raise _InactiveRpcError(state)  # pytype: disable=not-instantiable
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+grpc._channel._InactiveRpcError: <_InactiveRpcError of RPC that terminated with:
+	status = StatusCode.UNAVAILABLE
+	details = "failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:37401: Failed to connect to remote host: Connection refused"
+	debug_error_string = "UNAVAILABLE:failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:37401: Failed to connect to remote host: Connection refused"
+>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/grpc_handler.py", line 257, in _wait_for_channel_ready
+    target_final_channel, target_stub = self._setup_identifier_interceptor(
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/grpc_handler.py", line 450, in _setup_identifier_interceptor
+    else self._internal_register(user, host, stub=target_stub, timeout=timeout)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/grpc_handler.py", line 3267, in _internal_register
+    response = target_stub.Connect(request=req, timeout=kwargs.get("timeout"))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_channel.py", line 1168, in __call__
+    return _end_unary_response_blocking(state, call, False, None)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_channel.py", line 999, in _end_unary_response_blocking
+    raise _InactiveRpcError(state)  # pytype: disable=not-instantiable
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+grpc._channel._InactiveRpcError: <_InactiveRpcError of RPC that terminated with:
+	status = StatusCode.UNAVAILABLE
+	details = "failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:37401: Failed to connect to remote host: Connection refused"
+	debug_error_string = "UNAVAILABLE:failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:37401: Failed to connect to remote host: Connection refused"
+>
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/connection_manager.py", line 672, in _recover
+    managed.handler.reconnect(address=new_address, timeout=managed.connect_timeout)
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/grpc_handler.py", line 318, in reconnect
+    new_final_channel, new_stub = self._wait_for_channel_ready(
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/grpc_handler.py", line 264, in _wait_for_channel_ready
+    raise MilvusException(
+pymilvus.exceptions.MilvusException: <MilvusException: (code=2, message=Fail connecting to server on 127.0.0.1:37401, illegal connection params or server unavailable)>
+2026-08-16 18:41:05,067 [ERROR][_log_rpc_error]: RPC error: [release_collection], <MilvusException: (code=2, message=Fail connecting to server on 127.0.0.1:37401, illegal connection params or server unavailable)>, <elapsed:3.8ms>
+Traceback:
+Traceback (most recent call last):
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/decorators.py", line 419, in handler
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/grpc_handler.py", line 1968, in release_collection
+    response = self._stub.ReleaseCollection(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_interceptor.py", line 276, in __call__
+    response, ignored_call = self._with_call(
+                             ^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_interceptor.py", line 331, in _with_call
+    return call.result(), call
+           ^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_channel.py", line 447, in result
+    raise self
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_interceptor.py", line 314, in continuation
+    response, call = self._thunk(new_method).with_call(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_channel.py", line 1182, in with_call
+    return _end_unary_response_blocking(state, call, True, None)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_channel.py", line 999, in _end_unary_response_blocking
+    raise _InactiveRpcError(state)  # pytype: disable=not-instantiable
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+grpc._channel._InactiveRpcError: <_InactiveRpcError of RPC that terminated with:
+	status = StatusCode.UNAVAILABLE
+	details = "failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:37401: Failed to connect to remote host: Connection refused"
+	debug_error_string = "UNAVAILABLE:failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:37401: Failed to connect to remote host: Connection refused"
+>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/grpc_handler.py", line 257, in _wait_for_channel_ready
+    target_final_channel, target_stub = self._setup_identifier_interceptor(
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/grpc_handler.py", line 450, in _setup_identifier_interceptor
+    else self._internal_register(user, host, stub=target_stub, timeout=timeout)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/grpc_handler.py", line 3267, in _internal_register
+    response = target_stub.Connect(request=req, timeout=kwargs.get("timeout"))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_channel.py", line 1168, in __call__
+    return _end_unary_response_blocking(state, call, False, None)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/grpc/_channel.py", line 999, in _end_unary_response_blocking
+    raise _InactiveRpcError(state)  # pytype: disable=not-instantiable
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+grpc._channel._InactiveRpcError: <_InactiveRpcError of RPC that terminated with:
+	status = StatusCode.UNAVAILABLE
+	details = "failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:37401: Failed to connect to remote host: Connection refused"
+	debug_error_string = "UNAVAILABLE:failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:37401: Failed to connect to remote host: Connection refused"
+>
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/decorators.py", line 518, in handler
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/decorators.py", line 565, in handler
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/decorators.py", line 425, in handler
+    args[0]._on_rpc_error(e)
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/connection_manager.py", line 512, in <lambda>
+    handler._on_rpc_error = lambda error: self.handle_error(handler, error)
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/connection_manager.py", line 726, in handle_error
+    self._recover(managed)
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/connection_manager.py", line 672, in _recover
+    managed.handler.reconnect(address=new_address, timeout=managed.connect_timeout)
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/grpc_handler.py", line 318, in reconnect
+    new_final_channel, new_stub = self._wait_for_channel_ready(
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khang/Documents/AIC/AIC2026/.venv/lib/python3.12/site-packages/pymilvus/client/grpc_handler.py", line 264, in _wait_for_channel_ready
+    raise MilvusException(
+pymilvus.exceptions.MilvusException: <MilvusException: (code=2, message=Fail connecting to server on 127.0.0.1:37401, illegal connection params or server unavailable)>
+ (decorators.py:472)

@@ -1,0 +1,139 @@
+.card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+.thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: var(--bg-elev-2);
+}
+
+.thumb :global(img),
+.thumb :global(div) {
+  border-radius: 0;
+}
+
+.rank {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 10, 16, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 700;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+}
+
+.meta {
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metaRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.video {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.timestamp {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.scoreRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scoreValue {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  min-width: 34px;
+  text-align: right;
+}
+
+.scoreTrack {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-elev-2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.scoreFill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #059669, var(--accent));
+}
+
+.tags {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.tags li {
+  font-size: 11px;
+  background: var(--accent-soft);
+  color: #6ee7b7;
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.frameId {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.frameId code {
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -169,7 +169,7 @@ class MilvusRetriever:
 
         with torch.no_grad():
             if "siglip" in self.model_name.lower():
-                inputs = self._tokenize(text=[query], padding="max_length", return_tensors="pt").to(self.device)
+                inputs = self._tokenize(text=[query], padding="max_length", truncation=True, return_tensors="pt").to(self.device)
                 text_features = self._model.get_text_features(**inputs)
             else:
                 text_inputs = self._tokenize([query], truncate=True).to(self.device)

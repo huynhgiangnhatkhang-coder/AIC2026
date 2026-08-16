@@ -142,21 +142,7 @@ class TRAKESearcher:
 
     def search(self, event_queries: List[str]) -> List[Dict]:
         """
-        Thực hiện TRAKE search.
-        
-        Args:
-            event_queries: list mô tả N sự kiện theo thứ tự thời gian
-                          Ví dụ: ["vận động viên giậm nhảy", "bay qua xà", "tiếp đất"]
-                          
-        Returns:
-            List of answer dicts, sorted by total_score:
-            [{
-                "video_id": str,
-                "frame_ids": [int, ...],   # N frame ids, thứ tự tăng dần
-                "total_score": float,
-                "events": [{"event_index": int, "frame_id": int, ...}],
-                "rank": int
-            }]
+        Thực hiện TRAKE search: Two-Stage Retrieval + Bounded Temporal DP
         """
         N = len(event_queries)
         if N == 0:
@@ -164,54 +150,141 @@ class TRAKESearcher:
 
         print(f"[TRAKE] Tìm kiếm {N} sự kiện...")
 
-        # Bước 1: Tìm candidates cho mỗi event
-        all_stage_results = []
+        # ==============================================================
+        # STAGE 1: COARSE RETRIEVAL & VIDEO SCORING
+        # ==============================================================
+        # Tìm danh sách ứng viên mở rộng cho TẤT CẢ các sự kiện
+        coarse_results = []
+        video_scores = defaultdict(float)
+        
         for i, eq in enumerate(event_queries):
-            print(f"  [Event {i+1}/{N}] Query: '{eq}'")
-            candidates = self._search_event(eq)
-            all_stage_results.append(candidates)
-            print(f"    → {len(candidates)} candidates")
+            print(f"  [Stage 1] Lọc thô sự kiện {i+1}/{N}: '{eq}'")
+            # Tìm rộng hơn một chút (ví dụ top 1000)
+            cands = self.retriever.search(eq, top_k=self.top_k_per_event * 3)
+            coarse_results.append(cands)
+            
+            # Ghi nhận điểm max của mỗi video trong sự kiện này
+            vid_max_score = defaultdict(float)
+            for c in cands:
+                vid = c["video_id"]
+                vid_max_score[vid] = max(vid_max_score[vid], c["score"])
+                
+            # Cộng dồn điểm để tìm các video hứa hẹn nhất (có nhiều sự kiện điểm cao)
+            for vid, score in vid_max_score.items():
+                video_scores[vid] += score
 
-        # Bước 2: Gom theo video
-        stages_by_video: Dict[str, List[List[Dict]]] = defaultdict(
-            lambda: [[] for _ in range(N)]
-        )
+        if not video_scores:
+            return []
 
-        for stage_idx, stage_cands in enumerate(all_stage_results):
-            for item in stage_cands:
-                vid = item["video_id"]
-                stages_by_video[vid][stage_idx].append(item)
+        # Chọn Top 50 video tiềm năng nhất
+        TOP_M_VIDEOS = 50
+        top_videos = sorted(video_scores.keys(), key=lambda v: video_scores[v], reverse=True)[:TOP_M_VIDEOS]
+        print(f"[TRAKE] Đã chọn Top {len(top_videos)} videos tiềm năng để chạy Stage 2")
 
-        print(f"[TRAKE] {len(stages_by_video)} videos có candidates")
+        # ==============================================================
+        # STAGE 2: FINE-GRAINED RETRIEVAL (DENSE)
+        # ==============================================================
+        # Vì milvus-lite dễ crash khi truyền filter IN quá dài, ta sẽ lọc trên Python.
+        # Bằng cách lấy top 3000-5000 kết quả và chỉ giữ lại những frame thuộc top_videos.
+        top_videos_set = set(top_videos)
+        dense_stages_by_video: Dict[str, List[List[Dict]]] = {vid: [[] for _ in range(N)] for vid in top_videos}
+        
+        for i, eq in enumerate(event_queries):
+            print(f"  [Stage 2] Quét sâu sự kiện {i+1}/{N} trong {len(top_videos)} videos (lọc bằng Python)...")
+            cands = self.retriever.search(eq, top_k=3000)
+            for c in cands:
+                vid = c["video_id"]
+                if vid in top_videos_set:
+                    dense_stages_by_video[vid][i].append(c)
 
-        # Bước 3: DP trên từng video
-        if N == 1:
-            # Special case: chỉ 1 event → không cần DP
-            answers = []
-            for vid, stages in stages_by_video.items():
-                if not stages[0]:
-                    continue
-                best = max(stages[0], key=lambda x: x["score"])
-                answers.append({
-                    "video_id": vid,
-                    "frame_ids": [best["frame_index"]],
-                    "total_score": best["score"],
-                    "events": [{"event_index": 0, "frame_id": best["frame_index"],
-                                "score": best["score"]}],
-                    "rank": 0
+        # ==============================================================
+        # STAGE 3: TEMPORAL DYNAMIC PROGRAMMING WITH MAX_GAP CONSTRAINT
+        # ==============================================================
+        MAX_GAP = 13  # Các sự kiện xảy ra trong vòng ~30 keyframes
+        
+        answers = []
+        for vid, stages in dense_stages_by_video.items():
+            # stages là list gồm N list candidates
+            # Sắp xếp các candidates trong mỗi stage theo thứ tự thời gian (frame_index)
+            for i in range(N):
+                stages[i].sort(key=lambda x: x["frame_index"])
+            
+            # Nếu 1 trong các sự kiện không có candidate nào, ta không drop hẳn video
+            # (như code cũ) mà cho phép bỏ qua nếu có thể, 
+            # nhưng tốt nhất là DP vẫn cần đủ. Để đơn giản, nếu thiếu hẳn 1 stage thì rớt.
+            if any(len(stage) == 0 for stage in stages):
+                continue
+                
+            # Khởi tạo DP: dp[j] là điểm tối đa kết thúc tại candidates[j] của stage hiện tại
+            prev_stage_cands = stages[0]
+            dp_prev = [c["score"] for c in prev_stage_cands]
+            backtrack = [[] for _ in range(N)]
+            backtrack[0] = [-1] * len(prev_stage_cands)
+            
+            valid_sequence_found = True
+            
+            for i in range(1, N):
+                curr_stage_cands = stages[i]
+                dp_curr = [float("-inf")] * len(curr_stage_cands)
+                back_curr = [-1] * len(curr_stage_cands)
+                
+                # Trỏ 2 con trỏ hoặc brute-force O(N*M) vì số frame nhỏ
+                for j, curr_cand in enumerate(curr_stage_cands):
+                    best_prev_idx = -1
+                    best_prev_score = float("-inf")
+                    
+                    for k, prev_cand in enumerate(prev_stage_cands):
+                        gap = curr_cand["frame_index"] - prev_cand["frame_index"]
+                        # Ràng buộc thời gian: phải xảy ra sau (gap > 0) và khoảng cách ngắn (gap <= MAX_GAP)
+                        if 0 < gap <= MAX_GAP:
+                            if dp_prev[k] > best_prev_score:
+                                best_prev_score = dp_prev[k]
+                                best_prev_idx = k
+                                
+                    if best_prev_idx != -1:
+                        # Thưởng thêm nếu frame liên tiếp sát nhau (gap nhỏ)
+                        gap_penalty = (gap / MAX_GAP) * 0.05
+                        dp_curr[j] = curr_cand["score"] + best_prev_score - gap_penalty
+                        back_curr[j] = best_prev_idx
+                        
+                if all(v == float("-inf") for v in dp_curr):
+                    valid_sequence_found = False
+                    break
+                    
+                dp_prev = dp_curr
+                prev_stage_cands = curr_stage_cands
+                backtrack[i] = back_curr
+                
+            if not valid_sequence_found:
+                continue
+                
+            # Lấy đỉnh có điểm cao nhất ở stage cuối
+            best_last_idx = max(range(len(dp_prev)), key=lambda idx: dp_prev[idx])
+            total_score = dp_prev[best_last_idx]
+            
+            # Truy vết ngược
+            seq_events = []
+            curr_idx = best_last_idx
+            for i in range(N - 1, -1, -1):
+                cand = stages[i][curr_idx]
+                seq_events.append({
+                    "event_index": i,
+                    "frame_id": cand["frame_index"],
+                    "frame_filename": cand["frame_filename"],
+                    "frame_path": cand.get("frame_path", ""),
+                    "score": cand["score"]
                 })
-        else:
-            best_by_video = self._dp_monotone_chain(dict(stages_by_video))
-            answers = []
-            for vid, seq in best_by_video.items():
-                frame_ids = [e["frame_id"] for e in seq["events"]]
-                answers.append({
-                    "video_id": vid,
-                    "frame_ids": frame_ids,
-                    "total_score": seq["total_score"],
-                    "events": seq["events"],
-                    "rank": 0
-                })
+                curr_idx = backtrack[i][curr_idx]
+                
+            seq_events.reverse()
+            
+            answers.append({
+                "video_id": vid,
+                "frame_ids": [e["frame_id"] for e in seq_events],
+                "total_score": total_score,
+                "events": seq_events,
+                "rank": 0
+            })
 
         # Bước 4: Sort và rank
         answers = sorted(answers, key=lambda x: x["total_score"], reverse=True)

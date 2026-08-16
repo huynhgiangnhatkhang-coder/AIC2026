@@ -131,11 +131,10 @@ class QASearcher:
             }]
         """
         # Bước 1: Retrieval — tìm top candidate frames
-        # Kết hợp query + question để CLIP search chính xác hơn
-        combined_query = f"{query} {question}" if query != question else query
-
+        # Sửa lỗi AIC 2026: Không ghép query và question nữa vì sẽ làm nhiễu không gian vector.
+        # Dùng query (mô tả ngữ cảnh) để tìm frame chuẩn xác nhất.
         raw_results = self.retriever.search(
-            query=combined_query,
+            query=query,
             top_k=self.max_answers * 3
         )
 
@@ -161,14 +160,22 @@ class QASearcher:
                 print(f"  [VQA] {item['video_id']} frame {item['frame_index']}: "
                       f"'{answer}' (conf={confidence:.3f})")
 
-            # Bước 3: Score = retrieval_score * 0.5 + vqa_confidence * 0.5
+            # Bước 3: Scoring & Ranking có lọc nhiễu
             for item, answer, vqa_conf in vqa_results:
                 retrieval_score = item.get("hybrid_score", item.get("score", 0.0))
-                combined_score = 0.5 * retrieval_score + 0.5 * vqa_conf
+                
+                ans_clean = answer.strip().lower()
+                if not ans_clean or ans_clean == "unknown" or ans_clean == "unanswerable":
+                    # Phạt cực nặng nếu trả lời unknown hoặc rỗng (tránh frame lỗi lên top)
+                    combined_score = retrieval_score * 0.1
+                else:
+                    combined_score = 0.5 * retrieval_score + 0.5 * vqa_conf
+                    
                 answers.append({
                     "video_id": item["video_id"],
                     "frame_id": item["frame_index"],
                     "frame_filename": item["frame_filename"],
+                    "frame_path": item.get("frame_path", ""),
                     "answer": answer,
                     "retrieval_score": retrieval_score,
                     "vqa_confidence": vqa_conf,
@@ -184,10 +191,12 @@ class QASearcher:
                     "video_id": item["video_id"],
                     "frame_id": item["frame_index"],
                     "frame_filename": item["frame_filename"],
+                    "frame_path": item.get("frame_path", ""),
                     "answer": "",  # chưa biết answer
                     "retrieval_score": item.get("hybrid_score", item.get("score", 0.0)),
                     "vqa_confidence": 0.0,
-                    "score": item.get("hybrid_score", item.get("score", 0.0)) * 0.5,
+                    # Phạt cực kỳ nặng (0.01) vì không có answer, để không vượt qua các frame VQA
+                    "score": item.get("hybrid_score", item.get("score", 0.0)) * 0.01,
                     "rank": 0
                 })
         else:
@@ -197,6 +206,7 @@ class QASearcher:
                     "video_id": item["video_id"],
                     "frame_id": item["frame_index"],
                     "frame_filename": item["frame_filename"],
+                    "frame_path": item.get("frame_path", ""),
                     "answer": "",
                     "retrieval_score": item.get("hybrid_score", item.get("score", 0.0)),
                     "vqa_confidence": 0.0,

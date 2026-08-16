@@ -28,7 +28,7 @@ from typing import List, Optional, Dict, Any
 import yaml
 
 from src.retrieval import CLIPRetriever, BM25Retriever, HybridRetriever
-from src.query import TextualKISSearcher, QASearcher, TRAKESearcher
+from src.query import FlorenceKISSearcher, QASearcher, TRAKESearcher
 from src.submission import SubmissionManager
 
 # ── Load config ────────────────────────────────────────────
@@ -78,13 +78,16 @@ def get_clip_retriever():
     return get_vector_retriever()
 
 
-def get_bm25_retriever() -> BM25Retriever:
+def get_bm25_retriever() -> Optional[BM25Retriever]:
     global _bm25_retriever
     if _bm25_retriever is None:
-        _bm25_retriever = BM25Retriever(
-            corpus_path=cfg["index"]["bm25_corpus_path"],
-            frame_map_path=cfg["index"]["frame_map_path"]
-        )
+        bm25_corpus_path = cfg["index"]["bm25_corpus_path"]
+        frame_map_path = cfg["index"]["frame_map_path"]
+        if os.path.exists(bm25_corpus_path) and os.path.exists(frame_map_path):
+            _bm25_retriever = BM25Retriever(
+                corpus_path=bm25_corpus_path,
+                frame_map_path=frame_map_path
+            )
     return _bm25_retriever
 
 
@@ -100,13 +103,16 @@ def get_hybrid_retriever() -> HybridRetriever:
     return _hybrid_retriever
 
 
-def get_kis_searcher() -> TextualKISSearcher:
+def get_kis_searcher() -> FlorenceKISSearcher:
     global _kis_searcher
     if _kis_searcher is None:
-        _kis_searcher = TextualKISSearcher(
-            retriever=get_hybrid_retriever(),
+        _kis_searcher = FlorenceKISSearcher(
+            vector_retriever=get_vector_retriever(),
+            collection_name=cfg["index"]["milvus_collection"],
             keyframes_dir=str(cfg["data"].get("keyframes_root", "DATASET")),
-            max_answers=cfg["retrieval"]["final_top_k"]
+            ocr_db_path="ocr_database.json",
+            max_answers=cfg["retrieval"]["final_top_k"],
+            batch_size=8
         )
     return _kis_searcher
 
@@ -182,6 +188,7 @@ class KISRequest(BaseModel):
     query: str = Field(..., description="Mô tả văn bản cần tìm", example="Một người đang mở laptop trong phòng họp")
     object_hints: Optional[List[str]] = Field(None, description="Các object keywords để boost", example=["laptop", "person"])
     top_k: int = Field(100, ge=1, le=100)
+    search_mode: str = Field("hybrid", description="Chế độ tìm kiếm: hybrid, text, visual")
 
 
 class QARequest(BaseModel):
@@ -266,12 +273,12 @@ def search_kis(req: KISRequest):
     """
     try:
         searcher = get_kis_searcher()
-        results = searcher.search(req.query, object_hints=req.object_hints)
+        results = searcher.search(req.query, object_hints=req.object_hints, search_mode=req.search_mode)
 
         answers = []
-        for r in results[:req.top_k]:
+        for i, r in enumerate(results[:req.top_k], 1):
             answers.append(AnswerItem(
-                rank=r["rank"],
+                rank=r.get("rank", i),
                 video_id=r["video_id"],
                 frame_id=r["frame_id"],
                 score=r.get("score", 0.0),
