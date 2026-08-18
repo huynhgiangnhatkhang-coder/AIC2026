@@ -26,8 +26,8 @@ data:
 
 index:
   # Milvus Lite Config
-  milvus_db_path: "./aic_kis_database_siglip.db"
-  milvus_collection: "kis_keyframes_siglip"
+  milvus_db_path: "http://aicpc.sytes.net:19530"
+  milvus_collection: "aic_siglip_test"
 
   # FAISS (fallback)
   faiss_index_path: "./indexes/clip_faiss.index"

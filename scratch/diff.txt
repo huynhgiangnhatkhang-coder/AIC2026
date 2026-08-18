@@ -1,0 +1,69 @@
+diff --git a/src/query/florence_kis.py b/src/query/florence_kis.py
+index d27cc08..d350a02 100644
+--- a/src/query/florence_kis.py
++++ b/src/query/florence_kis.py
+@@ -7,7 +7,7 @@ import torch
+ from PIL import Image
+ from pymilvus import MilvusClient
+ from transformers import AutoProcessor, AutoModelForCausalLM, AutoModel
+-from translate import analyze_query_offline_mt
++from src.query.translate import analyze_query_offline_mt
+ from tqdm import tqdm
+ 
+ SIGLIP_MODEL_NAME = "google/siglip-base-patch16-224"
+@@ -42,10 +42,7 @@ class FlorenceKISSearcher:
+         else:
+             print("[WARN] Milvus client is None. SigLIP visual search will be disabled.")
+ 
+-        self.siglip_processor = AutoProcessor.from_pretrained(SIGLIP_MODEL_NAME)
+-        self.siglip_model = (
+-            AutoModel.from_pretrained(SIGLIP_MODEL_NAME).to(self.device).eval()
+-        )
++        # Không tự load SigLIP nữa, dùng chung model từ vector_retriever
+ 
+         self.florence_processor = AutoProcessor.from_pretrained(
+             FLORENCE_MODEL_NAME, trust_remote_code=True
+@@ -310,23 +307,27 @@ class FlorenceKISSearcher:
+         existing_ocr_keys = set()
+         
+         if self.milvus_client:
+-            text_inputs = self.siglip_processor(
+-                text=[siglip_query], padding="max_length", return_tensors="pt"
+-            ).to(self.device)
+-            with torch.no_grad():
+-                text_features = self.siglip_model.get_text_features(**text_inputs)
+-                text_features = text_features / text_features.norm(
+-                    p=2, dim=-1, keepdim=True
++            text_vector = self.vector_retriever.encode_text(siglip_query).tolist()
++
++            try:
++                search_results = self.milvus_client.search(
++                    collection_name=self.collection_name,
++                    data=[text_vector],
++                    limit=1000,
++                    output_fields=["video_id", "frame_id"],
++                    search_params={"metric_type": "IP", "params": {"ef": 1024}},
+                 )
+-                text_vector = text_features[0].cpu().tolist()
+-
+-            search_results = self.milvus_client.search(
+-                collection_name=self.collection_name,
+-                data=[text_vector],
+-                limit=1000,
+-                output_fields=["video_id", "frame_id"],
+-                search_params={"metric_type": "IP", "params": {"ef": 128}},
+-            )
++            except Exception as e:
++                if "metric type not match" in str(e).lower() or "expected=cosine" in str(e).lower():
++                    search_results = self.milvus_client.search(
++                        collection_name=self.collection_name,
++                        data=[text_vector],
++                        limit=1000,
++                        output_fields=["video_id", "frame_id"],
++                        search_params={"metric_type": "COSINE", "params": {"ef": 1024}},
++                    )
++                else:
++                    raise e
+             
+             search_hits = search_results[0]
+         else:

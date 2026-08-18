@@ -7,7 +7,7 @@ import torch
 from PIL import Image
 from pymilvus import MilvusClient
 from transformers import AutoProcessor, AutoModelForCausalLM, AutoModel
-from translate import analyze_query_offline_mt
+from src.query.translate import analyze_query_offline_mt
 from tqdm import tqdm
 
 SIGLIP_MODEL_NAME = "google/siglip-base-patch16-224"
@@ -320,13 +320,25 @@ class FlorenceKISSearcher:
                 )
                 text_vector = text_features[0].cpu().tolist()
 
-            search_results = self.milvus_client.search(
-                collection_name=self.collection_name,
-                data=[text_vector],
-                limit=1000,
-                output_fields=["video_id", "frame_id"],
-                search_params={"metric_type": "IP", "params": {"ef": 128}},
-            )
+            try:
+                search_results = self.milvus_client.search(
+                    collection_name=self.collection_name,
+                    data=[text_vector],
+                    limit=1000,
+                    output_fields=["video_id", "frame_id"],
+                    search_params={"metric_type": "IP", "params": {"ef": 1024}},
+                )
+            except Exception as e:
+                if "metric type not match" in str(e).lower() or "expected=cosine" in str(e).lower():
+                    search_results = self.milvus_client.search(
+                        collection_name=self.collection_name,
+                        data=[text_vector],
+                        limit=1000,
+                        output_fields=["video_id", "frame_id"],
+                        search_params={"metric_type": "COSINE", "params": {"ef": 1024}},
+                    )
+                else:
+                    raise e
             
             search_hits = search_results[0]
         else:

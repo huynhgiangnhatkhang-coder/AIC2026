@@ -59,14 +59,15 @@ class MilvusRetriever:
         """
         from pymilvus import MilvusClient
 
-        if not Path(self.db_path).exists():
-            raise FileNotFoundError(
-                f"Milvus DB chưa tồn tại: {self.db_path}\n"
-                f"→ Chạy: python scripts/02b_build_milvus_db.py --config config.yaml"
-            )
+        if not str(self.db_path).startswith("http") and not str(self.db_path).startswith("tcp"):
+            if not Path(self.db_path).exists():
+                raise FileNotFoundError(
+                    f"Milvus DB chưa tồn tại: {self.db_path}\n"
+                    f"→ Chạy: python scripts/02b_build_milvus_db.py --config config.yaml"
+                )
 
         print(f"[MilvusRetriever] Kết nối Database: {self.db_path}")
-        self._client = MilvusClient(self.db_path)
+        self._client = MilvusClient(uri=self.db_path)
 
         # Bắt buộc gọi load_collection để nạp index vào bộ nhớ trước khi search
         self._client.load_collection(self.collection_name)
@@ -159,7 +160,7 @@ class MilvusRetriever:
                     "ViT-B-32", pretrained="openai", device=self.device
                 )
                 self._model = model.eval()
-                self._tokenize = open_clip.get_tokenizer("ViT-B-32")
+                self._tokenize = open_clip.tokenize
 
     def encode_text(self, query: str) -> np.ndarray:
         """
@@ -172,7 +173,11 @@ class MilvusRetriever:
                 inputs = self._tokenize(text=[query], padding="max_length", truncation=True, return_tensors="pt").to(self.device)
                 text_features = self._model.get_text_features(**inputs)
             else:
-                text_inputs = self._tokenize([query], truncate=True).to(self.device)
+                try:
+                    text_inputs = self._tokenize([query], truncate=True).to(self.device)
+                except TypeError:
+                    # open_clip.tokenize không hỗ trợ tham số truncate
+                    text_inputs = self._tokenize([query]).to(self.device)
                 text_features = self._model.encode_text(text_inputs)
 
             # L2-normalize
@@ -246,7 +251,7 @@ class MilvusRetriever:
                     data=[text_vector],
                     limit=top_k,
                     output_fields=["video_id", "frame_id", "frame_filename"],
-                    search_params={"metric_type": "IP"},
+                    search_params={"metric_type": "COSINE"},
                     filter=filter_expr
                 )
             except Exception as e2:
