@@ -14,7 +14,10 @@ Pipeline:
 """
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
+import base64
+import requests
 from ..retrieval.hybrid_retriever import HybridRetriever
+from .florence_kis import FlorenceKISSearcher
 
 
 class QASearcher:
@@ -25,119 +28,103 @@ class QASearcher:
     Hỗ trợ lazy loading model để tiết kiệm memory khi không cần VQA.
     """
 
-    def __init__(self, retriever: HybridRetriever,
-                 vqa_model_name: str = "Salesforce/blip2-opt-2.7b",
+    def __init__(self, kis_searcher: FlorenceKISSearcher,
+                 vqa_model_name: str = "local-model",
+                 api_url: str = "http://aicpc.sytes.net:1234/v1/chat/completions",
                  device: str = "cuda",
                  top_k_frames_for_vqa: int = 5,
-                 max_answers: int = 100):
+                 max_answers: int = 100,
+                 keyframes_dir: str = "DATASET"):
         """
         Args:
-            retriever:              HybridRetriever đã khởi tạo
-            vqa_model_name:         HuggingFace model ID cho VQA
+            kis_searcher:           FlorenceKISSearcher đã khởi tạo
+            vqa_model_name:         Model giả lập cho LM Studio
+            api_url:                URL của máy chủ LM Studio
             device:                 "cuda" hoặc "cpu"
             top_k_frames_for_vqa:   số frame đưa vào VQA model
             max_answers:            số câu trả lời tối đa
+            keyframes_dir:          thư mục chứa ảnh gốc
         """
-        self.retriever = retriever
+        self.kis_searcher = kis_searcher
         self.vqa_model_name = vqa_model_name
+        self.api_url = api_url
         self.device = device
         self.top_k_frames_for_vqa = top_k_frames_for_vqa
         self.max_answers = max_answers
-        self._vqa_model = None
-        self._vqa_processor = None
+        self.keyframes_dir = keyframes_dir
 
-    def _load_vqa_model(self):
-        """Lazy-load Qwen2-VL VQA model."""
-        if self._vqa_model is None:
-            from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
-            import torch
-
-            print(f"[QA] Loading VQA model: {self.vqa_model_name}")
-            self._vqa_processor = AutoProcessor.from_pretrained(self.vqa_model_name)
-            self._vqa_model = Qwen2VLForConditionalGeneration.from_pretrained(
-                self.vqa_model_name,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                device_map="auto"
+    def _resolve_image_path(self, video_id: str, frame_id: int) -> Optional[str]:
+        video_folder = video_id.replace(".mp4", "")
+        batch_prefix = video_folder.split("_")[0]
+        batch_folder_name = f"Keyframes_{batch_prefix}"
+        import os
+        possible_formats = [
+            f"{frame_id}.jpg", f"{frame_id:03d}.jpg", f"{frame_id:04d}.jpg",
+            f"{frame_id:05d}.jpg", f"{frame_id:06d}.jpg", f"{frame_id}.png",
+            f"{frame_id:04d}.png",
+        ]
+        for fmt in possible_formats:
+            temp_path = os.path.join(
+                self.keyframes_dir, batch_folder_name, "keyframes",
+                video_folder, fmt,
             )
-            self._vqa_model.eval()
-            print("[QA] VQA model loaded!")
+            if os.path.exists(temp_path):
+                return temp_path
+        return None
+
+    def _encode_image_to_base64(self, image_path: str) -> str:
+        """Encodes a local image file to base64 string."""
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode("utf-8")
 
     def _run_vqa(self, image_path: str, question: str) -> Tuple[str, float]:
         """
-        Chạy VQA model (Qwen2-VL) trên một ảnh.
+        Chạy VQA bằng cách gửi request tới LM Studio Server.
         
         Returns:
             (answer_text, confidence_score)
         """
-        self._load_vqa_model()
-
-        import torch
-        from PIL import Image
-        from qwen_vl_utils import process_vision_info
-
-        # Định dạng messages chuẩn của Qwen2-VL
-        messages = [
-            {
-                "role": "user",
-                "content": [
+        try:
+            base64_image = self._encode_image_to_base64(image_path)
+            
+            payload = {
+                "model": self.vqa_model_name,
+                "messages": [
                     {
-                        "type": "image",
-                        "image": f"file://{image_path}",
+                        "role": "system",
+                        "content": "You are an AI assistant for video visual question answering (VQA). You must NOT output internal thoughts or reasoning. Skip all analysis and output ONLY the final answer precisely and concisely."
                     },
-                    {"type": "text", "text": question},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": question},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}"
+                                },
+                            },
+                        ],
+                    },
                 ],
+                "temperature": 0.2,
+                "stream": False,
             }
-        ]
 
-        text = self._vqa_processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-        image_inputs, video_inputs = process_vision_info(messages)
+            headers = {"Content-Type": "application/json"}
+            response = requests.post(self.api_url, headers=headers, json=payload, timeout=60)
 
-        inputs = self._vqa_processor(
-            text=[text],
-            images=image_inputs,
-            videos=video_inputs,
-            padding=True,
-            return_tensors="pt",
-        ).to(self.device)
+            if response.status_code == 200:
+                result = response.json()
+                answer = result["choices"][0]["message"]["content"].strip()
+                return (answer, 0.9)
+            else:
+                print(f"[VQA Error] HTTP {response.status_code}: {response.text}")
+                return ("unknown", 0.1)
 
-        with torch.no_grad():
-            outputs = self._vqa_model.generate(
-                **inputs,
-                max_new_tokens=128,
-                output_scores=True,
-                return_dict_in_generate=True
-            )
-
-        generated_ids = outputs.sequences
-        generated_ids_trimmed = [
-            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
-        ]
-        
-        answer = self._vqa_processor.batch_decode(
-            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
-        )[0].strip()
-
-        # Tính confidence score (nếu lấy được token probabilities)
-        if hasattr(outputs, "scores") and outputs.scores:
-            try:
-                # Tính trung bình log_softmax của các token được tạo ra
-                log_probs = []
-                for idx, logits in enumerate(outputs.scores):
-                    token_id = generated_ids_trimmed[0][idx].item()
-                    probs = torch.nn.functional.softmax(logits[0], dim=-1)
-                    log_prob = torch.log(probs[token_id] + 1e-10).item()
-                    log_probs.append(log_prob)
-                avg_log_prob = sum(log_probs) / len(log_probs)
-                import math
-                confidence = math.exp(avg_log_prob)
-            except Exception:
-                confidence = 0.5
-        else:
-            confidence = 0.5
-
-        return (answer, confidence)
+        except Exception as e:
+            print(f"[VQA Error] {e}")
+            return ("unknown", 0.1)
 
     def search(self, query: str, question: str,
                use_vqa: bool = True) -> List[Dict]:
@@ -160,12 +147,12 @@ class QASearcher:
                 "rank": int
             }]
         """
-        # Bước 1: Retrieval — tìm top candidate frames
-        # Sửa lỗi AIC 2026: Không ghép query và question nữa vì sẽ làm nhiễu không gian vector.
-        # Dùng query (mô tả ngữ cảnh) để tìm frame chuẩn xác nhất.
-        raw_results = self.retriever.search(
-            query=query,
-            top_k=self.max_answers * 3
+        # Bước 1: Retrieval — tìm top candidate frames bằng toàn bộ KIS pipeline
+        # Áp dụng nguyên xi KIS sang với top_k = 300
+        raw_results = self.kis_searcher.search(
+            raw_query=query,
+            search_mode="visual",  # Có thể dùng "hybrid", nhưng visual nhanh hơn
+            top_k=75
         )
 
         if not raw_results:
@@ -179,20 +166,24 @@ class QASearcher:
             vqa_results = []
 
             for item in vqa_candidates:
-                img_path = item.get("frame_path", "")
-                if not img_path or not Path(img_path).exists():
+                # KIS đã check path tồn tại, nhưng cẩn thận check lại
+                img_path = item.get("image_path")
+                if not img_path:
+                    img_path = self._resolve_image_path(item["video_id"], item["frame_id"])
+                
+                if not img_path:
                     # Fallback: không có ảnh → skip VQA, dùng dummy answer
                     vqa_results.append((item, "unknown", 0.0))
                     continue
 
                 answer, confidence = self._run_vqa(img_path, question)
                 vqa_results.append((item, answer, confidence))
-                print(f"  [VQA] {item['video_id']} frame {item['frame_index']}: "
+                print(f"  [VQA] {item['video_id']} frame {item['frame_id']}: "
                       f"'{answer}' (conf={confidence:.3f})")
 
             # Bước 3: Scoring & Ranking có lọc nhiễu
             for item, answer, vqa_conf in vqa_results:
-                retrieval_score = item.get("hybrid_score", item.get("score", 0.0))
+                retrieval_score = item.get("score", 0.0)
                 
                 ans_clean = answer.strip().lower()
                 if not ans_clean or ans_clean == "unknown" or ans_clean == "unanswerable":
@@ -203,9 +194,9 @@ class QASearcher:
                     
                 answers.append({
                     "video_id": item["video_id"],
-                    "frame_id": item["frame_index"],
-                    "frame_filename": item["frame_filename"],
-                    "frame_path": item.get("frame_path", ""),
+                    "frame_id": item["frame_id"],
+                    "frame_filename": item.get("frame_filename", f"{item['frame_id']:04d}.jpg"),
+                    "frame_path": item.get("image_path", ""),
                     "answer": answer,
                     "retrieval_score": retrieval_score,
                     "vqa_confidence": vqa_conf,
@@ -219,14 +210,14 @@ class QASearcher:
                     break
                 answers.append({
                     "video_id": item["video_id"],
-                    "frame_id": item["frame_index"],
-                    "frame_filename": item["frame_filename"],
-                    "frame_path": item.get("frame_path", ""),
+                    "frame_id": item["frame_id"],
+                    "frame_filename": item.get("frame_filename", f"{item['frame_id']:04d}.jpg"),
+                    "frame_path": item.get("image_path", ""),
                     "answer": "",  # chưa biết answer
-                    "retrieval_score": item.get("hybrid_score", item.get("score", 0.0)),
+                    "retrieval_score": item.get("score", 0.0),
                     "vqa_confidence": 0.0,
                     # Phạt cực kỳ nặng (0.01) vì không có answer, để không vượt qua các frame VQA
-                    "score": item.get("hybrid_score", item.get("score", 0.0)) * 0.01,
+                    "score": item.get("score", 0.0) * 0.01,
                     "rank": 0
                 })
         else:
@@ -234,13 +225,13 @@ class QASearcher:
             for item in raw_results:
                 answers.append({
                     "video_id": item["video_id"],
-                    "frame_id": item["frame_index"],
-                    "frame_filename": item["frame_filename"],
-                    "frame_path": item.get("frame_path", ""),
+                    "frame_id": item["frame_id"],
+                    "frame_filename": item.get("frame_filename", f"{item['frame_id']:04d}.jpg"),
+                    "frame_path": item.get("image_path", ""),
                     "answer": "",
-                    "retrieval_score": item.get("hybrid_score", item.get("score", 0.0)),
+                    "retrieval_score": item.get("score", 0.0),
                     "vqa_confidence": 0.0,
-                    "score": item.get("hybrid_score", item.get("score", 0.0)),
+                    "score": item.get("score", 0.0),
                     "rank": 0
                 })
 

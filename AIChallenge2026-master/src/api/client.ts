@@ -42,7 +42,7 @@ export function isApiError(e: unknown): e is ApiError {
   return e instanceof ApiError;
 }
 
-const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 600_000;
 
 function resolveBaseUrl(): string {
   const configured = import.meta.env.VITE_API_BASE_URL;

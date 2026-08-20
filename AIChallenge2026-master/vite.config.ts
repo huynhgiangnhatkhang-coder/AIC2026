@@ -12,11 +12,11 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       proxy: {
-        "/health": { target, changeOrigin: true, timeout: 60_000 },
-        "/info": { target, changeOrigin: true, timeout: 60_000 },
-        "/search": { target, changeOrigin: true, timeout: 60_000 },
-        "/frames": { target, changeOrigin: true, timeout: 60_000 },
-        "/submit": { target, changeOrigin: true, timeout: 60_000 },
+        "/health": { target, changeOrigin: true, timeout: 600_000 },
+        "/info": { target, changeOrigin: true, timeout: 600_000 },
+        "/search": { target, changeOrigin: true, timeout: 600_000 },
+        "/frames": { target, changeOrigin: true, timeout: 600_000 },
+        "/submit": { target, changeOrigin: true, timeout: 600_000 },
       },
     },
   };

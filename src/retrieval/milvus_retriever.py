@@ -239,7 +239,7 @@ class MilvusRetriever:
                 anns_field="embedding",
                 search_params=search_params,
                 limit=top_k,
-                output_fields=["video_id", "frame_id", "frame_filename"],
+                output_fields=["video_id", "frame_id"],
                 filter=filter_expr
             )
         except Exception as e:
@@ -250,7 +250,7 @@ class MilvusRetriever:
                     collection_name=self.collection_name,
                     data=[text_vector],
                     limit=top_k,
-                    output_fields=["video_id", "frame_id", "frame_filename"],
+                    output_fields=["video_id", "frame_id"],
                     search_params={"metric_type": "COSINE"},
                     filter=filter_expr
                 )
@@ -332,7 +332,7 @@ class MilvusRetriever:
             hits = self._client.query(
                 collection_name=self.collection_name,
                 filter=f"video_id == '{video_id}' and frame_id == {int(frame_id)}",
-                output_fields=["video_id", "frame_id", "frame_filename"],
+                output_fields=["video_id", "frame_id"],
                 limit=1,
             )
         except Exception as e:

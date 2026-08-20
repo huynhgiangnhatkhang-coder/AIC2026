@@ -135,8 +135,16 @@ class FlorenceKISSearcher:
                         batch_scores[valid_indices[j]] = min(score, 1.0)
 
                 all_scores.extend(batch_scores)
-            except Exception:
+            except Exception as e:
+                print(f"[Florence] Lỗi khi inference batch: {e}")
                 all_scores.extend([0.0] * len(batch_paths))
+                
+            try:
+                del inputs
+                del generated_ids
+                del generated_texts
+            except:
+                pass
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -221,11 +229,25 @@ class FlorenceKISSearcher:
                 
             ocr_text_no_accents = "".join(
                 c for c in unicodedata.normalize("NFD", ocr_text.lower()) if unicodedata.category(c) != "Mn"
-            ).replace("đ", "d")
-            ocr_norm = re.sub(r'[^\w\s]', ' ', ocr_text_no_accents)
+            )
+            ocr_norm = ocr_text_no_accents.replace("đ", "d")
+            ocr_norm = re.sub(r'[^\w\s]', ' ', ocr_norm)
             ocr_norm = re.sub(r'\s+', ' ', ocr_norm).strip()
+            if not ocr_norm:
+                continue
+
+            # Tối ưu: Nếu không có bất kỳ từ khóa nào xuất hiện (chuỗi con), bỏ qua ngay
+            has_any_word = False
+            for kw in keywords:
+                if kw in ocr_norm:
+                    has_any_word = True
+                    break
+            if not has_any_word:
+                continue
+
             n = len(keywords)
 
+            # 1) Khớp nguyên cụm từ đầy đủ
             if re.search(rf'\b{re.escape(search_phrase)}\b', ocr_norm) or \
                re.search(rf'\b{re.escape(search_phrase.replace(" ", ""))}\b', ocr_norm):
                 ocr_score = 1.0
@@ -272,7 +294,9 @@ class FlorenceKISSearcher:
         ocr_hits.sort(key=lambda x: x["ocr_score"], reverse=True)
         return ocr_hits[:200]
 
-    def search(self, raw_query, search_mode="hybrid", object_hints=None, **kwargs):
+    def search(self, raw_query, search_mode="hybrid", object_hints=None, top_k=None, **kwargs):
+        actual_top_k = top_k if top_k is not None else self.max_answers
+        print(f"DEBUG: florence_kis.search called with top_k={top_k}, actual_top_k={actual_top_k}")
         if search_mode == "text":
             print("\n[Search Mode] Thuần Chữ (OCR-only). Bỏ qua SigLIP/Florence.")
             ocr_only_hits = self._ocr_search(raw_query, set())
@@ -283,7 +307,7 @@ class FlorenceKISSearcher:
                 c["clip"] = 0.0
                 c["flo"] = 0.0
                 c["ocr"] = c["ocr_score"]
-            return ocr_only_hits[:self.max_answers]
+            return ocr_only_hits[:actual_top_k]
 
         parsed_query_data = analyze_query_offline_mt(raw_query)
         clip_query = parsed_query_data["clip_query"]
@@ -409,7 +433,7 @@ class FlorenceKISSearcher:
         for c in all_candidates:
             c["pre_score"] = c["clip_score"] + (c["ocr_score"] * ocr_weight)
         all_candidates.sort(key=lambda x: x["pre_score"], reverse=True)
-        top_candidates = all_candidates[: self.max_answers]
+        top_candidates = all_candidates[: actual_top_k]
 
         if has_proper_nouns:
             proper_nouns_lower = [p.lower() for p in proper_nouns]
@@ -466,7 +490,7 @@ class FlorenceKISSearcher:
             })
 
         scored_results.sort(key=lambda x: x["score"], reverse=True)
-        return scored_results[: self.max_answers]
+        return scored_results[: actual_top_k]
 
     def format_submission(self, answers):
         lines = []

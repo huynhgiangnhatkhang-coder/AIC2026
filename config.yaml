@@ -21,6 +21,13 @@ data:
   keyframes_dirs_list:
     - "./DATASET/Keyframes_L21/keyframes"
     - "./DATASET/Keyframes_L22/keyframes"
+    - "./DATASET/Keyframes_L23/keyframes"
+    - "./DATASET/Keyframes_L24/keyframes"
+    - "./DATASET/Keyframes_L25/keyframes"
+    - "./DATASET/Keyframes_L27/keyframes"
+    - "./DATASET/Keyframes_L28/keyframes"
+    - "./DATASET/Keyframes_L29/keyframes"
+    - "./DATASET/Keyframes_L30/keyframes"
 
   keyframes_root: "./DATASET"
 
@@ -44,13 +51,14 @@ retrieval:
   top_k_clip: 500
   top_k_bm25: 200
   top_k_object: 200
-  final_top_k: 100
+  final_top_k: 200
   clip_weight: 0.7
   bm25_weight: 0.3
 
 # --- VQA ---
 vqa:
-  model: "Qwen/Qwen2-VL-2B-Instruct"
+  api_url: "http://aicpc.sytes.net:1234/v1/chat/completions"
+  model: "local-model"
   device: "cuda"
   top_k_frames: 20
 

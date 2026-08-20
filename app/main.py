@@ -112,7 +112,7 @@ def get_kis_searcher() -> FlorenceKISSearcher:
             keyframes_dir=str(cfg["data"].get("keyframes_root", "DATASET")),
             ocr_db_path="ocr_database.json",
             max_answers=cfg["retrieval"]["final_top_k"],
-            batch_size=8
+            batch_size=4
         )
     return _kis_searcher
 
@@ -121,11 +121,13 @@ def get_qa_searcher() -> QASearcher:
     global _qa_searcher
     if _qa_searcher is None:
         _qa_searcher = QASearcher(
-            retriever=get_hybrid_retriever(),
+            kis_searcher=get_kis_searcher(),
             vqa_model_name=cfg["vqa"]["model"],
+            api_url=cfg["vqa"].get("api_url", "http://aicpc.sytes.net:1234/v1/chat/completions"),
             device=cfg["vqa"]["device"],
             top_k_frames_for_vqa=cfg["vqa"]["top_k_frames"],
-            max_answers=cfg["retrieval"]["final_top_k"]
+            max_answers=cfg["retrieval"]["final_top_k"],
+            keyframes_dir=str(cfg["data"].get("keyframes_root", "DATASET"))
         )
     return _qa_searcher
 
@@ -134,7 +136,7 @@ def get_trake_searcher() -> TRAKESearcher:
     global _trake_searcher
     if _trake_searcher is None:
         _trake_searcher = TRAKESearcher(
-            clip_retriever=get_vector_retriever(),
+            kis_searcher=get_kis_searcher(),
             top_k_per_event=cfg["trake"]["top_k_per_event"],
             max_answers=cfg["retrieval"]["final_top_k"]
         )
@@ -273,7 +275,14 @@ def search_kis(req: KISRequest):
     """
     try:
         searcher = get_kis_searcher()
-        results = searcher.search(req.query, object_hints=req.object_hints, search_mode=req.search_mode)
+        print(f"DEBUG: /search/kis called with req.top_k = {req.top_k}")
+        results = searcher.search(
+            raw_query=req.query,
+            object_hints=req.object_hints,
+            search_mode=req.search_mode,
+            top_k=req.top_k
+        )
+        print(f"DEBUG: searcher.search returned {len(results)} results")
 
         answers = []
         for i, r in enumerate(results[:req.top_k], 1):

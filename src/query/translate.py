@@ -64,13 +64,18 @@ def analyze_query_offline_mt(vietnamese_query: str) -> dict:
     # PHẦN B: Dịch sang tiếng Anh (100% Offline)
     inputs = mt_tokenizer(cleaned_query, return_tensors="pt", padding=True)
     with torch.no_grad():
-        translated_tokens = mt_model.generate(**inputs)
+        translated_tokens = mt_model.generate(**inputs, max_new_tokens=50)
     clip_query = mt_tokenizer.decode(translated_tokens[0], skip_special_tokens=True)
 
     # PHẦN C: Trích xuất danh sách object từ bản dịch
     clean_eng = clip_query.replace(".", "").lower().strip()
     raw_objects = re.split(r',|\band\b', clean_eng)
-    required_objects = [obj.strip() for obj in raw_objects if obj.strip()]
+    required_objects = []
+    for obj in raw_objects:
+        obj = obj.strip()
+        if obj and obj not in required_objects:
+            required_objects.append(obj)
+    required_objects = required_objects[:10]  # Giới hạn tối đa 10 objects
 
     print(f"[Translate] -> Câu tiếng Việt đã lọc: '{cleaned_query}'")
     print(f"[Translate] -> Dịch sang tiếng Anh (Opus-MT): '{clip_query}'")
