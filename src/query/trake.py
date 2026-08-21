@@ -10,7 +10,7 @@ from .florence_kis import FlorenceKISSearcher
 
 class TRAKESearcher:
     def __init__(self, kis_searcher: FlorenceKISSearcher,
-                 top_k_per_event: int = 200,
+                 top_k_per_event: int = 100,
                  max_answers: int = 100):
         self.kis_searcher = kis_searcher
         self.top_k_per_event = top_k_per_event
@@ -70,7 +70,6 @@ class TRAKESearcher:
                     dense_stages_by_video[vid][i].append(c)
 
         # 3. Temporal DP cực nhanh trên Top Videos
-        MAX_WINDOW = 10  # Toàn bộ chuỗi nằm gọn trong 10 frame
         answers = []
 
         for vid, vid_stages in dense_stages_by_video.items():
@@ -86,11 +85,9 @@ class TRAKESearcher:
             def dfs(stage_idx, current_seq, current_score):
                 nonlocal best_seq, best_score
                 if stage_idx == N:
-                    # Kiểm tra độ dài toàn chuỗi
-                    if current_seq[-1]["frame_index"] - current_seq[0]["frame_index"] <= MAX_WINDOW:
-                        if current_score > best_score:
-                            best_score = current_score
-                            best_seq = list(current_seq)
+                    if current_score > best_score:
+                        best_score = current_score
+                        best_seq = list(current_seq)
                     return
                 
                 for cand in vid_stages[stage_idx]:
@@ -99,9 +96,10 @@ class TRAKESearcher:
                     else:
                         prev_cand = current_seq[-1]
                         gap = cand["frame_index"] - prev_cand["frame_index"]
-                        # Phải đúng thứ tự (gap > 0) và khoảng cách tạm thời <= MAX_WINDOW
-                        if 0 < gap <= MAX_WINDOW:
-                            gap_penalty = (gap / MAX_WINDOW) * 0.05
+                        # Chỉ yêu cầu đúng thứ tự thời gian (gap > 0)
+                        if gap > 0:
+                            # Phạt rất nhẹ khoảng cách để ưu tiên các kết quả gần nhau hơn nếu điểm bằng nhau
+                            gap_penalty = gap * 0.0001
                             new_score = current_score + cand.get("score", 0) - gap_penalty
                             dfs(stage_idx + 1, current_seq + [cand], new_score)
 

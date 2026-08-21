@@ -112,7 +112,7 @@ def get_kis_searcher() -> FlorenceKISSearcher:
             keyframes_dir=str(cfg["data"].get("keyframes_root", "DATASET")),
             ocr_db_path="ocr_database.json",
             max_answers=cfg["retrieval"]["final_top_k"],
-            batch_size=4
+            batch_size=16
         )
     return _kis_searcher
 

@@ -32,9 +32,33 @@ class FlorenceKISSearcher:
         self.milvus_client = vector_retriever._client if vector_retriever else None
 
         self.ocr_data = {}
+        self._ocr_lookup = {}  # video_folder/frame_file -> ocr_text
+        self._ocr_norm_cache = {}  # key -> normalized ocr text (pre-computed)
+        self._ocr_norm_by_lookup = {}  # "video_folder/frame_file" -> normalized ocr text
         if os.path.exists(ocr_db_path):
             with open(ocr_db_path, "r", encoding="utf-8") as f:
                 self.ocr_data = json.load(f)
+            # Build O(1) lookup and pre-normalize all OCR text
+            for key, val in self.ocr_data.items():
+                parts = key.replace("\\", "/").split("/")
+                lookup_key = None
+                if len(parts) >= 2:
+                    lookup_key = f"{parts[-2]}/{parts[-1]}"
+                    self._ocr_lookup[lookup_key] = val
+                # Pre-normalize OCR text (biggest perf win)
+                norm = "".join(
+                    c for c in unicodedata.normalize("NFD", val.lower()) if unicodedata.category(c) != "Mn"
+                ).replace("đ", "d")
+                norm = re.sub(r'[^\w\s]', ' ', norm)
+                norm = re.sub(r'\s+', ' ', norm).strip()
+                self._ocr_norm_cache[key] = norm
+                if lookup_key:
+                    self._ocr_norm_by_lookup[lookup_key] = norm
+            print(f"[OCR] Built lookup index: {len(self._ocr_lookup)} entries, pre-normalized: {len(self._ocr_norm_cache)}")
+
+        # Build file existence cache for all keyframe dirs
+        self._frame_path_cache = {}  # (video_folder, frame_id) -> absolute_path
+        self._build_frame_cache(keyframes_dir)
 
         print(f"Debug: Milvus collection = {collection_name}")
         if self.milvus_client:
@@ -52,11 +76,43 @@ class FlorenceKISSearcher:
         )
         self.florence_model = (
             AutoModelForCausalLM.from_pretrained(
-                FLORENCE_MODEL_NAME, trust_remote_code=True
+                FLORENCE_MODEL_NAME, trust_remote_code=True, torch_dtype=torch.float16
             )
             .to(self.device)
             .eval()
         )
+
+    def _build_frame_cache(self, keyframes_dir):
+        """Pre-scan all keyframe directories to build a path cache."""
+        import glob
+        dataset_dir = keyframes_dir
+        pattern = os.path.join(dataset_dir, "Keyframes_*", "keyframes", "*", "*.*")
+        count = 0
+        for filepath in glob.iglob(pattern):
+            parts = filepath.replace("\\", "/").split("/")
+            video_folder = parts[-2]
+            frame_file = parts[-1]
+            frame_base = os.path.splitext(frame_file)[0]
+            try:
+                frame_id = int(frame_base)
+                self._frame_path_cache[(video_folder, frame_id)] = filepath
+                count += 1
+            except ValueError:
+                pass
+        print(f"[Cache] Built frame path cache: {count} files")
+
+    @staticmethod
+    def _extract_lookup_key(image_rel_path):
+        """Extract 'video_folder/frame_file' from a relative path."""
+        parts = image_rel_path.replace("\\", "/").split("/")
+        if len(parts) >= 2:
+            return f"{parts[-2]}/{parts[-1]}"
+        return image_rel_path
+
+    def _get_ocr_text(self, image_rel_path):
+        """O(1) OCR text lookup."""
+        lookup_key = self._extract_lookup_key(image_rel_path)
+        return self._ocr_lookup.get(lookup_key, "")
 
     def get_florence_scores_batch(self, image_paths, required_objects):
         if not required_objects or not image_paths:
@@ -97,6 +153,7 @@ class FlorenceKISSearcher:
                 inputs = self.florence_processor(
                     text=prompts, images=images, return_tensors="pt", padding=True
                 ).to(self.device)
+                inputs["pixel_values"] = inputs["pixel_values"].to(torch.float16)
                 with torch.no_grad():
                     generated_ids = self.florence_model.generate(
                         input_ids=inputs["input_ids"],
@@ -152,15 +209,13 @@ class FlorenceKISSearcher:
         return all_scores
 
     def get_ocr_score(self, image_rel_path, search_text):
-        if not search_text or not self.ocr_data:
+        if not search_text or not self._ocr_norm_by_lookup:
             return 0.0
-        image_rel_path = image_rel_path.replace("\\", "/")
-        ocr_text = ""
-        for key, val in self.ocr_data.items():
-            if image_rel_path.endswith(key.replace("\\", "/")):
-                ocr_text = val
-                break
-        if not ocr_text:
+        
+        # O(1) lookup for pre-normalized OCR text
+        lookup_key = self._extract_lookup_key(image_rel_path)
+        ocr_norm = self._ocr_norm_by_lookup.get(lookup_key, "")
+        if not ocr_norm:
             return 0.0
 
         search_text_no_accents = "".join(
@@ -171,27 +226,19 @@ class FlorenceKISSearcher:
         if not search_phrase:
             return 0.0
 
-        ocr_text_no_accents = "".join(
-            c for c in unicodedata.normalize("NFD", ocr_text.lower()) if unicodedata.category(c) != "Mn"
-        ).replace("đ", "d")
-        ocr_norm = re.sub(r'[^\w\s]', ' ', ocr_text_no_accents)
-        ocr_norm = re.sub(r'\s+', ' ', ocr_norm).strip()
-
-        # 1) Khớp nguyên cụm từ đầy đủ
-        if re.search(rf'\b{re.escape(search_phrase)}\b', ocr_norm) or \
-           re.search(rf'\b{re.escape(search_phrase.replace(" ", ""))}\b', ocr_norm):
+        # 1) Full phrase match
+        if search_phrase in ocr_norm or search_phrase.replace(" ", "") in ocr_norm:
             return 1.0
 
         keywords = search_phrase.split()
         n = len(keywords)
 
-        # 2) Sliding window: tìm cụm từ CON liên tiếp dài nhất có trong OCR
+        # 2) Sliding window
         best_sub_ratio = 0.0
         for win_len in range(n - 1, 1, -1):
             for start in range(n - win_len + 1):
                 sub_phrase = " ".join(keywords[start:start + win_len])
-                if re.search(rf'\b{re.escape(sub_phrase)}\b', ocr_norm) or \
-                   re.search(rf'\b{re.escape(sub_phrase.replace(" ", ""))}\b', ocr_norm):
+                if sub_phrase in ocr_norm or sub_phrase.replace(" ", "") in ocr_norm:
                     best_sub_ratio = win_len / n
                     break
             if best_sub_ratio > 0:
@@ -201,12 +248,12 @@ class FlorenceKISSearcher:
             return 0.5 + best_sub_ratio * 0.5
 
         # 3) Fallback
-        matched = sum(1 for kw in keywords if re.search(rf'\b{re.escape(kw)}\b', ocr_norm))
+        matched = sum(1 for kw in keywords if kw in ocr_norm)
         return (matched / n) * 0.5
 
     def _ocr_search(self, raw_query, existing_keys):
-        """Quét toàn bộ OCR database tìm frame có chữ khớp với query."""
-        if not self.ocr_data or not raw_query:
+        """Quét toàn bộ OCR database tìm frame có chữ khớp với query. (Optimized)"""
+        if not self._ocr_norm_cache or not raw_query:
             return []
 
         search_text = "".join(
@@ -221,22 +268,16 @@ class FlorenceKISSearcher:
             return []
             
         keywords = search_phrase.split()
+        n = len(keywords)
 
         ocr_hits = []
-        for key, ocr_text in self.ocr_data.items():
+        for key, ocr_norm in self._ocr_norm_cache.items():
             if key in existing_keys:
                 continue
-                
-            ocr_text_no_accents = "".join(
-                c for c in unicodedata.normalize("NFD", ocr_text.lower()) if unicodedata.category(c) != "Mn"
-            )
-            ocr_norm = ocr_text_no_accents.replace("đ", "d")
-            ocr_norm = re.sub(r'[^\w\s]', ' ', ocr_norm)
-            ocr_norm = re.sub(r'\s+', ' ', ocr_norm).strip()
             if not ocr_norm:
                 continue
 
-            # Tối ưu: Nếu không có bất kỳ từ khóa nào xuất hiện (chuỗi con), bỏ qua ngay
+            # Fast pre-filter: any keyword present as substring?
             has_any_word = False
             for kw in keywords:
                 if kw in ocr_norm:
@@ -245,11 +286,9 @@ class FlorenceKISSearcher:
             if not has_any_word:
                 continue
 
-            n = len(keywords)
-
-            # 1) Khớp nguyên cụm từ đầy đủ
-            if re.search(rf'\b{re.escape(search_phrase)}\b', ocr_norm) or \
-               re.search(rf'\b{re.escape(search_phrase.replace(" ", ""))}\b', ocr_norm):
+            # Score using simple string `in` instead of regex
+            # 1) Full phrase match
+            if search_phrase in ocr_norm or search_phrase.replace(" ", "") in ocr_norm:
                 ocr_score = 1.0
             else:
                 best_sub_ratio = 0.0
@@ -257,8 +296,7 @@ class FlorenceKISSearcher:
                     found = False
                     for start in range(n - win_len + 1):
                         sub_phrase = " ".join(keywords[start:start + win_len])
-                        if re.search(rf'\b{re.escape(sub_phrase)}\b', ocr_norm) or \
-                           re.search(rf'\b{re.escape(sub_phrase.replace(" ", ""))}\b', ocr_norm):
+                        if sub_phrase in ocr_norm or sub_phrase.replace(" ", "") in ocr_norm:
                             best_sub_ratio = win_len / n
                             found = True
                             break
@@ -268,7 +306,7 @@ class FlorenceKISSearcher:
                 if best_sub_ratio >= 0.5:
                     ocr_score = 0.5 + best_sub_ratio * 0.5
                 else:
-                    matched = sum(1 for kw in keywords if re.search(rf'\b{re.escape(kw)}\b', ocr_norm))
+                    matched = sum(1 for kw in keywords if kw in ocr_norm)
                     ocr_score = (matched / n) * 0.5
 
             if ocr_score >= 0.3:
@@ -279,17 +317,22 @@ class FlorenceKISSearcher:
                     frame_id = int(os.path.splitext(frame_file)[0])
                     video_id = f"{video_folder}.mp4"
 
-                    image_path = os.path.join(self.keyframes_dir, key)
-                    if os.path.exists(image_path):
-                        ocr_hits.append(
-                            {
-                                "video_id": video_id,
-                                "frame_id": frame_id,
-                                "image_path": image_path,
-                                "ocr_score": ocr_score,
-                                "clip_score": 0.0,
-                            }
-                        )
+                    # Use frame cache instead of os.path.exists
+                    image_path = self._frame_path_cache.get((video_folder, frame_id))
+                    if not image_path:
+                        image_path = os.path.join(self.keyframes_dir, key)
+                        if not os.path.exists(image_path):
+                            continue
+                    
+                    ocr_hits.append(
+                        {
+                            "video_id": video_id,
+                            "frame_id": frame_id,
+                            "image_path": image_path,
+                            "ocr_score": ocr_score,
+                            "clip_score": 0.0,
+                        }
+                    )
 
         ocr_hits.sort(key=lambda x: x["ocr_score"], reverse=True)
         return ocr_hits[:200]
@@ -372,23 +415,9 @@ class FlorenceKISSearcher:
             v_id = hit["entity"]["video_id"]
             f_id = hit["entity"]["frame_id"]
             video_folder = v_id.replace(".mp4", "")
-            batch_prefix = video_folder.split("_")[0]
-            batch_folder_name = f"Keyframes_{batch_prefix}"
 
-            possible_formats = [
-                f"{f_id}.jpg", f"{f_id:03d}.jpg", f"{f_id:04d}.jpg",
-                f"{f_id:05d}.jpg", f"{f_id:06d}.jpg", f"{f_id}.png",
-                f"{f_id:04d}.png",
-            ]
-            image_path = None
-            for fmt in possible_formats:
-                temp_path = os.path.join(
-                    self.keyframes_dir, batch_folder_name, "keyframes",
-                    video_folder, fmt,
-                )
-                if os.path.exists(temp_path):
-                    image_path = temp_path
-                    break
+            # O(1) cache lookup instead of 7x os.path.exists()
+            image_path = self._frame_path_cache.get((video_folder, f_id))
 
             if image_path:
                 rel_path = os.path.relpath(image_path, self.keyframes_dir)

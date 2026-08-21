@@ -64,7 +64,7 @@ vqa:
 
 # --- TRAKE ---
 trake:
-  top_k_per_event: 300
+  top_k_per_event: 100
 
 # --- Submission ---
 submission:

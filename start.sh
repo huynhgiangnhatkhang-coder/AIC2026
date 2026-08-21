@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "Đang khởi động Backend (FastAPI) trên cổng 8000..."
-.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload &
+.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 
 echo "Đang khởi động Frontend (Vite) trên cổng 5173..."
