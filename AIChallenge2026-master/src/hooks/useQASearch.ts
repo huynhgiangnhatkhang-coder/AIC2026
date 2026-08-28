@@ -1,4 +1,4 @@
-import { api } from "../api/client";
+import { apiWithFallback } from "../api/client";
 import type { KISSearchResponse } from "../api/types";
 import { useAsyncSearch } from "./useAsyncSearch";
 
@@ -13,7 +13,7 @@ export function useQASearch() {
   const { state, run, reset } = useAsyncSearch<KISSearchResponse>();
   const search = (params: QASearchRunParams) => {
     void run((signal) =>
-      api.searchQa({
+      apiWithFallback.searchQa({
         retrieval_query: params.retrievalQuery,
         question: params.question,
         use_vqa: params.useVqa,

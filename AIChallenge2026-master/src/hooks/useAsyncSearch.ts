@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import { ApiError, isApiError } from "../api/client";
+import type { FallbackResult } from "../api/client";
 
 export type AsyncSearchStatus = "idle" | "loading" | "success" | "error";
 
@@ -9,6 +10,8 @@ export interface AsyncSearchState<T> {
   data: T | null;
   error: string | null;
   errorDetail: string | null;
+  /** True when the result came from the offline demo fallback (backend down). */
+  isMock: boolean;
   /** Monotonically increasing run id — guards against stale results. */
   requestId: number;
 }
@@ -18,6 +21,7 @@ const IDLE: AsyncSearchState<never> = {
   data: null,
   error: null,
   errorDetail: null,
+  isMock: false,
   requestId: 0,
 };
 
@@ -31,7 +35,7 @@ export function useAsyncSearch<T>() {
   const controllerRef = useRef<AbortController | null>(null);
   const idRef = useRef(0);
 
-  const run = useCallback((fetcher: (signal: AbortSignal) => Promise<T>) => {
+  const run = useCallback((fetcher: (signal: AbortSignal) => Promise<FallbackResult<T>>) => {
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -41,8 +45,9 @@ export function useAsyncSearch<T>() {
 
     void (async () => {
       try {
-        const data = await fetcher(controller.signal);
-        if (id === idRef.current) setState({ status: "success", data, error: null, errorDetail: null, requestId: id });
+        const res = await fetcher(controller.signal);
+        if (id === idRef.current)
+          setState({ status: "success", data: res.data, isMock: res.isMock, error: null, errorDetail: null, requestId: id });
       } catch (err) {
         if (id !== idRef.current) return;
         if (isApiError(err) && err.kind === "abort") return;
@@ -50,6 +55,7 @@ export function useAsyncSearch<T>() {
           setState({
             status: "error",
             data: null,
+            isMock: false,
             error: err.message,
             errorDetail: err.detail ?? null,
             requestId: id,
@@ -58,6 +64,7 @@ export function useAsyncSearch<T>() {
           setState({
             status: "error",
             data: null,
+            isMock: false,
             error: err instanceof Error ? err.message : "Unknown error",
             errorDetail: null,
             requestId: id,
@@ -70,7 +77,7 @@ export function useAsyncSearch<T>() {
   const reset = useCallback(() => {
     controllerRef.current?.abort();
     idRef.current += 1;
-    setState({ status: "idle", data: null, error: null, errorDetail: null, requestId: idRef.current });
+    setState({ status: "idle", data: null, isMock: false, error: null, errorDetail: null, requestId: idRef.current });
   }, []);
 
   return { state, run, reset };

@@ -70,6 +70,10 @@ export interface FrameResult {
   video_url: string | null;
   fps: number | null;
   snippet: string | null;
+  /** Raw keyframe id — needed to build `video_id, frame_id` submission lines. */
+  frame_id: number | null;
+  /** VQA answer text (Q&A mode) or null for plain KIS. */
+  answer: string | null;
 }
 
 export interface KISSearchResponse {
@@ -97,6 +101,8 @@ export interface TemporalSequence {
 export interface TemporalVideo {
   video_name: string;
   best_sequence: TemporalSequence;
+  /** Ordered keyframe ids of the matched event sequence — TRAKE submission line. */
+  frame_ids: number[];
 }
 
 export interface TemporalSearchResponse {

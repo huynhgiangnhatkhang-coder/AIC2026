@@ -13,6 +13,11 @@
   transform: translateY(-1px);
 }
 
+.card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 4px 16px rgba(52, 211, 153, 0.18);
+}
+
 .thumb {
   position: relative;
   aspect-ratio: 16 / 9;
@@ -22,6 +27,29 @@
 .thumb :global(img),
 .thumb :global(div) {
   border-radius: 0;
+}
+
+.check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 10, 16, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.check input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .rank {

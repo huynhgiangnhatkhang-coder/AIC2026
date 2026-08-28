@@ -6,19 +6,47 @@ import {
   TRAKE_TOP_K_MAX,
   TRAKE_TOP_K_MIN,
 } from "../lib/constants";
+import { defaultQueryId } from "../lib/constants";
 import { formatScore, formatTimestampMs } from "../lib/format";
 import { useTrakeSearch } from "../hooks/useTrakeSearch";
+import { useSelection, type SelectedItem } from "../context/SelectionContext";
 import { ErrorBanner } from "./ErrorBanner";
 import { EmptyState } from "./EmptyState";
 import { FrameImage } from "./FrameImage";
+import { MockNotice } from "./MockNotice";
+import { QueryIdField } from "./QueryIdField";
 import { Spinner } from "./Spinner";
 import styles from "./TrakeSearch.module.css";
 
-function VideoRow({ video }: { video: TemporalVideo }) {
+function VideoRow({ video, queryId }: { video: TemporalVideo; queryId: string }) {
   const { best_sequence } = video;
+  const { isSelected, toggle } = useSelection();
+
+  const itemId = `${queryId}:trake:${video.video_name}`;
+  const selected = isSelected(itemId);
+
+  const item: SelectedItem = {
+    id: itemId,
+    queryId,
+    queryType: "trake",
+    videoId: video.video_name,
+    frameId: null,
+    frameIds: video.frame_ids,
+    answer: null,
+    score: best_sequence.total_score,
+  };
+
   return (
-    <article className={styles.videoCard}>
+    <article className={`${styles.videoCard} ${selected ? styles.selected : ""}`}>
       <header className={styles.videoHeader}>
+        <label className={styles.videoCheck} title={selected ? "Deselect this sequence" : "Select this sequence"}>
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => toggle(item)}
+            aria-label={`Select ${video.video_name} event sequence`}
+          />
+        </label>
         <code className={styles.videoName}>{video.video_name}</code>
         <span className={styles.score} title="Sequence similarity score">
           {formatScore(best_sequence.total_score)}
@@ -49,7 +77,7 @@ function VideoRow({ video }: { video: TemporalVideo }) {
   );
 }
 
-function TrakeResults({ data }: { data: TemporalSearchResponse }) {
+function TrakeResults({ data, queryId }: { data: TemporalSearchResponse; queryId: string }) {
   if (data.videos.length === 0) {
     return (
       <EmptyState
@@ -68,7 +96,7 @@ function TrakeResults({ data }: { data: TemporalSearchResponse }) {
       </header>
       <div className={styles.videos}>
         {data.videos.map((v) => (
-          <VideoRow key={v.video_name} video={v} />
+          <VideoRow key={v.video_name} video={v} queryId={queryId} />
         ))}
       </div>
     </section>
@@ -79,6 +107,7 @@ export function TrakeSearch() {
   const { state, search } = useTrakeSearch();
   const [events, setEvents] = useState<string[]>(["", "", ""]);
   const [topk, setTopk] = useState(DEFAULT_TRAKE_TOP_K);
+  const [queryId, setQueryId] = useState(() => defaultQueryId("trake"));
 
   const loading = state.status === "loading";
   const firstValid = (events[1]?.trim().length ?? 0) > 0;
@@ -164,6 +193,8 @@ export function TrakeSearch() {
               {loading ? "Searching…" : "Search sequence"}
             </button>
           </div>
+
+          <QueryIdField value={queryId} type="trake" disabled={loading} onChange={setQueryId} />
         </div>
       </div>
 
@@ -174,13 +205,16 @@ export function TrakeSearch() {
         {state.status === "loading" ? (
           <Spinner label="Finding videos with this event sequence…" />
         ) : null}
+        {state.isMock && state.status === "success" ? <MockNotice queryType="TRAKE" /> : null}
         {state.status === "idle" ? (
           <EmptyState
             title="No search yet"
             hint="Enter at least one event description to find videos containing the sequence."
           />
         ) : null}
-        {state.status === "success" && state.data ? <TrakeResults data={state.data} /> : null}
+        {state.status === "success" && state.data ? (
+          <TrakeResults data={state.data} queryId={queryId} />
+        ) : null}
       </div>
     </section>
   );

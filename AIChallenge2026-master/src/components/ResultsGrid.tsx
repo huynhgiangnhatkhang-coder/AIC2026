@@ -1,4 +1,5 @@
 import type { FrameResult } from "../api/types";
+import type { QueryType } from "../context/SelectionContext";
 import { FrameCard } from "./FrameCard";
 import styles from "./ResultsGrid.module.css";
 
@@ -6,9 +7,11 @@ interface ResultsGridProps {
   results: FrameResult[];
   total: number;
   queryLabel: string;
+  queryId: string;
+  queryType: QueryType;
 }
 
-export function ResultsGrid({ results, total, queryLabel }: ResultsGridProps) {
+export function ResultsGrid({ results, total, queryLabel, queryId, queryType }: ResultsGridProps) {
   return (
     <section aria-label="Search results" className={styles.section}>
       <header className={styles.header}>
@@ -19,7 +22,7 @@ export function ResultsGrid({ results, total, queryLabel }: ResultsGridProps) {
       </header>
       <div className={styles.grid}>
         {results.map((frame, i) => (
-          <FrameCard key={frame.id} frame={frame} index={i} />
+          <FrameCard key={frame.id} frame={frame} index={i} queryId={queryId} queryType={queryType} />
         ))}
       </div>
     </section>

@@ -1,4 +1,4 @@
-import { api } from "../api/client";
+import { apiWithFallback } from "../api/client";
 import type { KISSearchResponse } from "../api/types";
 import { useAsyncSearch } from "./useAsyncSearch";
 
@@ -13,7 +13,7 @@ export function useKISSearch() {
   const { state, run, reset } = useAsyncSearch<KISSearchResponse>();
   const search = (params: KISSearchRunParams) => {
     void run((signal) =>
-      api.searchKis({
+      apiWithFallback.searchKis({
         query: params.query,
         top_k: params.topK,
         object_hints: params.objectHints,

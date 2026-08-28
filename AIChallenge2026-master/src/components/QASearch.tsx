@@ -1,9 +1,12 @@
 import { useState } from "react";
 
 import { DEFAULT_TOP_K, QUERY_MAX_LENGTH, TOP_K_MAX, TOP_K_MIN } from "../lib/constants";
+import { defaultQueryId } from "../lib/constants";
 import { useQASearch } from "../hooks/useQASearch";
 import { EmptyState } from "./EmptyState";
 import { ErrorBanner } from "./ErrorBanner";
+import { MockNotice } from "./MockNotice";
+import { QueryIdField } from "./QueryIdField";
 import { ResultsGrid } from "./ResultsGrid";
 import { Spinner } from "./Spinner";
 import styles from "./QASearch.module.css";
@@ -14,6 +17,7 @@ export function QASearch() {
   const [question, setQuestion] = useState("");
   const [useVqa, setUseVqa] = useState(true);
   const [topK, setTopK] = useState(DEFAULT_TOP_K);
+  const [queryId, setQueryId] = useState(() => defaultQueryId("qa"));
 
   const loading = state.status === "loading";
   const valid = retrievalQuery.trim().length >= 1 && question.trim().length >= 1;
@@ -102,6 +106,8 @@ export function QASearch() {
               {loading ? "Searching…" : "Ask"}
             </button>
           </div>
+
+          <QueryIdField value={queryId} type="qa" disabled={loading} onChange={setQueryId} />
         </div>
       </div>
 
@@ -110,6 +116,7 @@ export function QASearch() {
           <ErrorBanner title="Q&A search failed" detail={state.errorDetail ?? state.error} actionLabel="Reset" onAction={reset} />
         ) : null}
         {state.status === "loading" ? <Spinner label="Retrieving frames and answering…" /> : null}
+        {state.isMock && state.status === "success" ? <MockNotice queryType="Q&A" /> : null}
         {state.status === "idle" ? (
           <EmptyState title="No question asked yet" hint="Enter a scene description and a question to retrieve matching frames." />
         ) : null}
@@ -117,7 +124,7 @@ export function QASearch() {
           state.data.count === 0 ? (
             <EmptyState title={`No frames matched “${state.data.query}”`} hint="Try a different scene description or wording." />
           ) : (
-            <ResultsGrid results={state.data.results} total={state.data.count} queryLabel={state.data.query} />
+            <ResultsGrid results={state.data.results} total={state.data.count} queryLabel={state.data.query} queryId={queryId} queryType="qa" />
           )
         ) : null}
       </div>

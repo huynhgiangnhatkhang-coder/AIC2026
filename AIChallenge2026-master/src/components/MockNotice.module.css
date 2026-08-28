@@ -1,0 +1,23 @@
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  color: #fde68a;
+  font-size: 13px;
+}
+
+.glyph {
+  flex-shrink: 0;
+  color: var(--warn);
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.notice strong {
+  color: var(--warn);
+}

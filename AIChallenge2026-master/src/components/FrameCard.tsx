@@ -1,4 +1,5 @@
 import type { FrameResult } from "../api/types";
+import { useSelection, type QueryType, type SelectedItem } from "../context/SelectionContext";
 import { formatScore, formatTimestampMs } from "../lib/format";
 import { FrameImage } from "./FrameImage";
 import styles from "./FrameCard.module.css";
@@ -6,17 +7,35 @@ import styles from "./FrameCard.module.css";
 interface FrameCardProps {
   frame: FrameResult;
   index: number;
+  queryId: string;
+  queryType: QueryType;
 }
 
 const COLLAPSED_TAGS = 4;
 
-export function FrameCard({ frame, index }: FrameCardProps) {
+export function FrameCard({ frame, index, queryId, queryType }: FrameCardProps) {
   const video = frame.video_name ?? "unknown";
   const tags = (frame.snippet ?? "").split(",").map((t) => t.trim()).filter(Boolean);
   const scorePct = Math.round(((frame.score + 1) / 2) * 100);
 
+  const { isSelected, toggle } = useSelection();
+
+  const itemId = `${queryId}:${queryType}:${frame.video_name ?? "unknown"}:${frame.frame_id ?? index + 1}`;
+  const selected = isSelected(itemId);
+
+  const item: SelectedItem = {
+    id: itemId,
+    queryId,
+    queryType,
+    videoId: frame.video_name ?? "unknown",
+    frameId: frame.frame_id,
+    frameIds: [],
+    answer: frame.answer,
+    score: frame.score,
+  };
+
   return (
-    <article className={styles.card} data-rank={frame.rank}>
+    <article className={`${styles.card} ${selected ? styles.selected : ""}`} data-rank={frame.rank}>
       <div className={styles.thumb}>
         <FrameImage
           src={frame.frame_url}
@@ -26,6 +45,14 @@ export function FrameCard({ frame, index }: FrameCardProps) {
         <span className={styles.rank} title={`Match rank ${frame.rank}`}>
           {index + 1}
         </span>
+        <label className={styles.check} title={selected ? "Deselect this frame" : "Select this frame"}>
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => toggle(item)}
+            aria-label={`Select ${video} frame ${frame.frame_id ?? ""}`}
+          />
+        </label>
       </div>
 
       <div className={styles.meta}>

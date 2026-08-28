@@ -1,8 +1,11 @@
 import { useState } from "react";
 
 import { useKISSearch } from "../hooks/useKISSearch";
+import { defaultQueryId } from "../lib/constants";
 import { EmptyState } from "./EmptyState";
 import { ErrorBanner } from "./ErrorBanner";
+import { MockNotice } from "./MockNotice";
+import { QueryIdField } from "./QueryIdField";
 import { ResultsGrid } from "./ResultsGrid";
 import { SearchBar, type SearchParams } from "./SearchBar";
 import { Spinner } from "./Spinner";
@@ -12,6 +15,7 @@ export function KISSearch() {
   const { state, search, reset } = useKISSearch();
   const [objectHints, setObjectHints] = useState("");
   const [searchMode, setSearchMode] = useState<"hybrid" | "text" | "visual">("hybrid");
+  const [queryId, setQueryId] = useState(() => defaultQueryId("kis"));
   const loading = state.status === "loading";
 
   const handleSearch = (params: SearchParams) => {
@@ -62,6 +66,7 @@ export function KISSearch() {
               onChange={(e) => setObjectHints(e.target.value)}
             />
           </div>
+          <QueryIdField value={queryId} type="kis" disabled={loading} onChange={setQueryId} />
         </div>
       </div>
 
@@ -76,6 +81,8 @@ export function KISSearch() {
         ) : null}
 
         {state.status === "loading" ? <Spinner label="Searching keyframes…" /> : null}
+
+        {state.isMock && state.status === "success" ? <MockNotice queryType="KIS" /> : null}
 
         {state.status === "idle" ? (
           <EmptyState
@@ -95,6 +102,8 @@ export function KISSearch() {
               results={state.data.results}
               total={state.data.count}
               queryLabel={state.data.query}
+              queryId={queryId}
+              queryType="textual_kis"
             />
           )
         ) : null}

@@ -13,6 +13,8 @@ import type {
   TrakeSearchRequest,
 } from "./types";
 
+import { mockKisResponse, mockQaResponse, mockTrakeResponse } from "../mocks/mockSearch";
+
 /**
  * Error taxonomy for the Lifelog Search frontend.
  * - NetworkError: backend unreachable / connection refused
@@ -167,17 +169,20 @@ async function request<T>(path: string, init: RequestInit, opts?: RequestOptions
 function mapAnswersToFrames(answers: AnswerItem[]): FrameResult[] {
   return answers.map((a, i) => {
     const frameKey = a.frame_id ?? a.frame_ids?.[0] ?? i + 1;
+    const frameId = a.frame_id ?? a.frame_ids?.[0] ?? null;
     return {
       rank: a.rank,
       id: `${a.video_id}:${frameKey}`,
       score: a.score,
-      frame_name: a.frame_id !== null && a.frame_id !== undefined ? `${a.video_id}/${a.frame_id}.jpg` : null,
+      frame_name: frameId !== null && frameId !== undefined ? `${a.video_id}/${frameId}.jpg` : null,
       video_name: a.video_id,
       timestamp_ms: null,
       frame_url: a.image_url ? absolutePath(a.image_url) : null,
       video_url: null,
       fps: null,
       snippet: a.answer ?? a.formatted,
+      frame_id: frameId,
+      answer: a.answer,
     };
   });
 }
@@ -197,6 +202,7 @@ function mapAnswersToVideos(answers: AnswerItem[]): TemporalVideo[] {
     return {
       video_name: a.video_id,
       best_sequence: { total_score: a.score, events },
+      frame_ids: fids,
     };
   });
 }
@@ -205,24 +211,24 @@ function mapAnswersToVideos(answers: AnswerItem[]): TemporalVideo[] {
 
 export interface SearchKisParams {
   query: string;
-  top_k?: number;
+  top_k?: number | undefined;
   object_hints?: string[] | null | undefined;
-  search_mode?: "hybrid" | "text" | "visual";
-  signal?: AbortSignal;
+  search_mode?: "hybrid" | "text" | "visual" | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 export interface SearchQaParams {
   retrieval_query: string;
   question: string;
-  use_vqa?: boolean;
-  top_k?: number;
-  signal?: AbortSignal;
+  use_vqa?: boolean | undefined;
+  top_k?: number | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 export interface SearchTrakeParams {
   events: string[];
-  top_k?: number;
-  signal?: AbortSignal;
+  top_k?: number | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 export const api = {
@@ -315,3 +321,52 @@ export function resolveMediaUrl(frameUrl: string | null | undefined): string | n
     return frameUrl;
   }
 }
+
+/* ---------- offline fallback (backend needs GPU, may be unavailable) ---------- */
+
+export interface FallbackResult<T> {
+  data: T;
+  /** True when the backend was unreachable and offline demo data was served. */
+  isMock: boolean;
+}
+
+/**
+ * Runs a backend request; on a failure caused by the GPU backend being
+ * unavailable (connection refused / timeout, or a 5xx from the dev proxy when
+ * the backend is down) it transparently returns demo data shaped exactly like
+ * the real response, so callers can keep using it without code changes.
+ */
+export async function withFallback<T>(
+  fetcher: () => Promise<T>,
+  fallback: () => T,
+): Promise<FallbackResult<T>> {
+  try {
+    const data = await fetcher();
+    return { data, isMock: false };
+  } catch (err) {
+    const unavailable =
+      (isApiError(err) && (err.kind === "network" || err.kind === "timeout")) ||
+      (isApiError(err) && err.kind === "http" && (err.status ?? 0) >= 500);
+    if (unavailable) {
+      return { data: fallback(), isMock: true };
+    }
+    throw err;
+  }
+}
+
+export const apiWithFallback = {
+  searchKis: (params: SearchKisParams, opts?: RequestOptions) =>
+    withFallback(() => api.searchKis(params, opts), () =>
+      mockKisResponse(params.query, params.top_k ?? 100),
+    ),
+
+  searchQa: (params: SearchQaParams, opts?: RequestOptions) =>
+    withFallback(() => api.searchQa(params, opts), () =>
+      mockQaResponse(params.retrieval_query, params.question, params.top_k ?? 50),
+    ),
+
+  searchTrake: (params: SearchTrakeParams, opts?: RequestOptions) =>
+    withFallback(() => api.searchTrake(params, opts), () =>
+      mockTrakeResponse(params.events, params.top_k ?? 50),
+    ),
+};
