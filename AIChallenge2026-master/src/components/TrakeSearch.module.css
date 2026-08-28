@@ -66,22 +66,13 @@
 }
 
 .controls {
-  display: grid;
-  grid-template-columns: auto 190px 200px auto;
+  display: flex;
+  flex-direction: column;
   gap: 16px;
-  align-items: end;
 }
 
-@media (max-width: 980px) {
-  .controls {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-@media (max-width: 560px) {
-  .controls {
-    grid-template-columns: 1fr;
-  }
+.controls .btn {
+  width: 100%;
 }
 
 .optValue {
