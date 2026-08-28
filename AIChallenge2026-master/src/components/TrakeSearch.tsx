@@ -1,11 +1,7 @@
 import { useState } from "react";
 
 import type { TemporalSearchResponse, TemporalVideo } from "../api/types";
-import {
-  DEFAULT_TRAKE_TOP_K,
-  TRAKE_TOP_K_MAX,
-  TRAKE_TOP_K_MIN,
-} from "../lib/constants";
+import { DEFAULT_TRAKE_TOP_K, TRAKE_TOP_K_MAX, TRAKE_TOP_K_MIN } from "../lib/constants";
 import { defaultQueryId } from "../lib/constants";
 import { formatScore, formatTimestampMs } from "../lib/format";
 import { useTrakeSearch } from "../hooks/useTrakeSearch";
@@ -39,7 +35,10 @@ function VideoRow({ video, queryId }: { video: TemporalVideo; queryId: string })
   return (
     <article className={`${styles.videoCard} ${selected ? styles.selected : ""}`}>
       <header className={styles.videoHeader}>
-        <label className={styles.videoCheck} title={selected ? "Deselect this sequence" : "Select this sequence"}>
+        <label
+          className={styles.videoCheck}
+          title={selected ? "Deselect this sequence" : "Select this sequence"}
+        >
           <input
             type="checkbox"
             checked={selected}
@@ -105,12 +104,12 @@ function TrakeResults({ data, queryId }: { data: TemporalSearchResponse; queryId
 
 export function TrakeSearch() {
   const { state, search } = useTrakeSearch();
-  const [events, setEvents] = useState<string[]>(["", "", ""]);
+  const [events, setEvents] = useState<string[]>([""]);
   const [topk, setTopk] = useState(DEFAULT_TRAKE_TOP_K);
   const [queryId, setQueryId] = useState(() => defaultQueryId("trake"));
 
   const loading = state.status === "loading";
-  const firstValid = (events[1]?.trim().length ?? 0) > 0;
+  const firstValid = (events[0]?.trim().length ?? 0) > 0;
 
   const setEvent = (i: number, value: string) =>
     setEvents((prev) => prev.map((e, idx) => (idx === i ? value : e)));
@@ -126,18 +125,13 @@ export function TrakeSearch() {
     });
   };
 
-  const tagMap: { [id: number]: string } = {
-    0: "Before",
-    1: "Current",
-    2: "After",
-  };
   return (
     <section className={styles.section}>
       <div className={styles.leftCol}>
         <div className={`panel ${styles.panel}`}>
           <p className={styles.intro}>
-            Describe a <strong>sequence of events</strong> (in chronological order) that should happen
-            in one video — e.g. <em>“a person enters a building”</em> then{" "}
+            Describe a <strong>sequence of events</strong> (in chronological order) that should
+            happen in one video — e.g. <em>“a person enters a building”</em> then{" "}
             <em>“they exit with a bag”</em>. Videos containing the whole sequence are ranked first.
           </p>
 
@@ -152,7 +146,7 @@ export function TrakeSearch() {
                   type="text"
                   value={ev}
                   maxLength={500}
-                  placeholder={tagMap[i]}
+                  placeholder={`Event ${i}`}
                   aria-label={`Event ${i + 1} description`}
                   disabled={loading}
                   onChange={(e) => setEvent(i, e.target.value)}
@@ -191,6 +185,22 @@ export function TrakeSearch() {
               disabled={!firstValid || loading}
             >
               {loading ? "Searching…" : "Search sequence"}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => setEvents((prev) => [...prev, ""])}
+              disabled={loading}
+            >
+              {loading ? "Hold…" : "Add event"}
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => setEvents([""])}
+              disabled={loading}
+            >
+              {loading ? "Hold…" : "Reset events"}
             </button>
           </div>
 
