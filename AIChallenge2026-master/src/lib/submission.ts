@@ -33,7 +33,8 @@ export function formatAnswer(item: SelectedItem): string | null {
 
   if (queryType === "qa") {
     if (item.frameId === null || item.frameId === undefined) return null;
-    return `${videoId}, ${item.frameId}, ${item.answer ?? ""}`;
+    const answer = (item.answer ?? "").replace(/"/g, '""');
+    return `${videoId}, ${item.frameId}, "${answer}"`;
   }
 
   if (queryType === "trake") {
