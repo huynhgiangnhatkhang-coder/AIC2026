@@ -133,9 +133,11 @@ class TRAKESearcher:
         return answers[:self.max_answers]
 
     def format_submission(self, answers: List[Dict]) -> List[str]:
+        from src.frame_id_map import frame_ids_from_indexes
         lines = []
         for ans in answers:
-            frame_ids_str = ", ".join(str(fid) for fid in ans["frame_ids"])
+            frame_ids = frame_ids_from_indexes(ans["video_id"], ans["frame_ids"])
+            frame_ids_str = ", ".join(str(fid) for fid in frame_ids)
             line = f"{ans['video_id']}, {frame_ids_str}"
             lines.append(line)
         return lines

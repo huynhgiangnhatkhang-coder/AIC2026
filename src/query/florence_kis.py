@@ -522,8 +522,10 @@ class FlorenceKISSearcher:
         return scored_results[: actual_top_k]
 
     def format_submission(self, answers):
+        from src.frame_id_map import frame_id_from_index
         lines = []
         for ans in answers:
-            line = f"{ans['video_id']}, {ans['frame_id']}"
+            frame_id = frame_id_from_index(ans["video_id"], ans["frame_id"])
+            line = f"{ans['video_id']}, {frame_id}"
             lines.append(line)
         return lines

@@ -40,6 +40,8 @@ index:
   faiss_index_path: "./indexes/clip_faiss.index"
   frame_map_path: "./indexes/frame_map.json"
   bm25_corpus_path: "./indexes/bm25_corpus.json"
+  # keyframe index (n) -> frame_idx (frame gốc video) — dùng ở tầng output
+  frame_id_map_path: "./indexes/frame_id_map.json"
 
 # --- CLIP Model ---
 clip:

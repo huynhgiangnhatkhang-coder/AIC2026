@@ -250,7 +250,9 @@ class QASearcher:
         """
         lines = []
         for ans in answers:
+            from src.frame_id_map import frame_id_from_index
             answer = ans.get("answer", "")
-            line = f"{ans['video_id']}, {ans['frame_id']}, {answer}"
+            frame_id = frame_id_from_index(ans["video_id"], ans["frame_id"])
+            line = f"{ans['video_id']}, {frame_id}, {answer}"
             lines.append(line)
         return lines

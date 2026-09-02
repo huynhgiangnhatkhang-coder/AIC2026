@@ -30,6 +30,7 @@ import yaml
 from src.retrieval import CLIPRetriever, BM25Retriever, HybridRetriever
 from src.query import FlorenceKISSearcher, QASearcher, TRAKESearcher
 from src.submission import SubmissionManager
+from src.frame_id_map import frame_id_from_index, frame_ids_from_indexes
 
 # ── Load config ────────────────────────────────────────────
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config.yaml")
@@ -286,13 +287,15 @@ def search_kis(req: KISRequest):
 
         answers = []
         for i, r in enumerate(results[:req.top_k], 1):
+            idx = r["frame_id"]
+            fid = frame_id_from_index(r["video_id"], idx)
             answers.append(AnswerItem(
                 rank=r.get("rank", i),
                 video_id=r["video_id"],
-                frame_id=r["frame_id"],
+                frame_id=fid,
                 score=r.get("score", 0.0),
-                formatted=f"{r['video_id']}, {r['frame_id']}",
-                image_url=f"/frames/{r['video_id']}/{r['frame_id']}"
+                formatted=f"{r['video_id']}, {fid}",
+                image_url=f"/frames/{r['video_id']}/{idx}"
             ))
 
         return SearchResponse(
@@ -321,14 +324,16 @@ def search_qa(req: QARequest):
 
         answers = []
         for r in results[:req.top_k]:
+            idx = r["frame_id"]
+            fid = frame_id_from_index(r["video_id"], idx)
             answers.append(AnswerItem(
                 rank=r["rank"],
                 video_id=r["video_id"],
-                frame_id=r["frame_id"],
+                frame_id=fid,
                 answer=r.get("answer", ""),
                 score=r.get("score", 0.0),
-                formatted=f"{r['video_id']}, {r['frame_id']}, {r.get('answer', '')}",
-                image_url=f"/frames/{r['video_id']}/{r['frame_id']}"
+                formatted=f"{r['video_id']}, {fid}, {r.get('answer', '')}",
+                image_url=f"/frames/{r['video_id']}/{idx}"
             ))
 
         return SearchResponse(
@@ -359,6 +364,7 @@ def search_trake(req: TRAKERequest):
         answers = []
         for r in results[:req.top_k]:
             fids = r.get("frame_ids", [])
+            true_fids = frame_ids_from_indexes(r["video_id"], fids)
             # TRAKE: frame_ids = [before, current, after, ...]; middle là frame hiện tại
             cur = None
             if fids:
@@ -367,9 +373,9 @@ def search_trake(req: TRAKERequest):
             answers.append(AnswerItem(
                 rank=r["rank"],
                 video_id=r["video_id"],
-                frame_ids=fids,
+                frame_ids=true_fids,
                 score=r.get("total_score", 0.0),
-                formatted=f"{r['video_id']}, " + ", ".join(str(f) for f in fids),
+                formatted=f"{r['video_id']}, " + ", ".join(str(f) for f in true_fids),
                 image_url=(f"/frames/{r['video_id']}/{cur}" if cur is not None else None)
             ))
 
