@@ -24,6 +24,7 @@ data:
     - "./DATASET/Keyframes_L23/keyframes"
     - "./DATASET/Keyframes_L24/keyframes"
     - "./DATASET/Keyframes_L25/keyframes"
+    - "./DATASET/Keyframes_L26/keyframes"
     - "./DATASET/Keyframes_L27/keyframes"
     - "./DATASET/Keyframes_L28/keyframes"
     - "./DATASET/Keyframes_L29/keyframes"
@@ -33,8 +34,8 @@ data:
 
 index:
   # Milvus Lite Config
-  milvus_db_path: "http://aicpc.sytes.net:19530"
-  milvus_collection: "aic_siglip_test"
+  milvus_db_path: "./aic_kis_database_siglip.db"
+  milvus_collection: "kis_keyframes_siglip"
 
   # FAISS (fallback)
   faiss_index_path: "./indexes/clip_faiss.index"

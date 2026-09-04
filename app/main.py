@@ -111,7 +111,7 @@ def get_kis_searcher() -> FlorenceKISSearcher:
             vector_retriever=get_vector_retriever(),
             collection_name=cfg["index"]["milvus_collection"],
             keyframes_dir=str(cfg["data"].get("keyframes_root", "DATASET")),
-            ocr_db_path="ocr_database.json",
+            ocr_db_path="processed data" if os.path.isdir("processed data") else "ocr_database.json",
             max_answers=cfg["retrieval"]["final_top_k"],
             batch_size=16
         )

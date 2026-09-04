@@ -35,26 +35,40 @@ class FlorenceKISSearcher:
         self._ocr_lookup = {}  # video_folder/frame_file -> ocr_text
         self._ocr_norm_cache = {}  # key -> normalized ocr text (pre-computed)
         self._ocr_norm_by_lookup = {}  # "video_folder/frame_file" -> normalized ocr text
-        if os.path.exists(ocr_db_path):
+        
+        if os.path.isdir(ocr_db_path):
+            import glob
+            files = glob.glob(os.path.join(ocr_db_path, "*.json"))
+            for filepath in files:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for k, v in data.items():
+                        if k in self.ocr_data:
+                            self.ocr_data[k] += " " + str(v)
+                        else:
+                            self.ocr_data[k] = str(v)
+            print(f"[OCR] Loaded multiple JSON files from {ocr_db_path}: {len(files)} files")
+        elif os.path.exists(ocr_db_path):
             with open(ocr_db_path, "r", encoding="utf-8") as f:
                 self.ocr_data = json.load(f)
-            # Build O(1) lookup and pre-normalize all OCR text
-            for key, val in self.ocr_data.items():
-                parts = key.replace("\\", "/").split("/")
-                lookup_key = None
-                if len(parts) >= 2:
-                    lookup_key = f"{parts[-2]}/{parts[-1]}"
-                    self._ocr_lookup[lookup_key] = val
-                # Pre-normalize OCR text (biggest perf win)
-                norm = "".join(
-                    c for c in unicodedata.normalize("NFD", val.lower()) if unicodedata.category(c) != "Mn"
-                ).replace("đ", "d")
-                norm = re.sub(r'[^\w\s]', ' ', norm)
-                norm = re.sub(r'\s+', ' ', norm).strip()
-                self._ocr_norm_cache[key] = norm
-                if lookup_key:
-                    self._ocr_norm_by_lookup[lookup_key] = norm
-            print(f"[OCR] Built lookup index: {len(self._ocr_lookup)} entries, pre-normalized: {len(self._ocr_norm_cache)}")
+
+        # Build O(1) lookup and pre-normalize all OCR text
+        for key, val in self.ocr_data.items():
+            parts = key.replace("\\", "/").split("/")
+            lookup_key = None
+            if len(parts) >= 2:
+                lookup_key = f"{parts[-2]}/{parts[-1]}"
+                self._ocr_lookup[lookup_key] = val
+            # Pre-normalize OCR text (biggest perf win)
+            norm = "".join(
+                c for c in unicodedata.normalize("NFD", val.lower()) if unicodedata.category(c) != "Mn"
+            ).replace("đ", "d")
+            norm = re.sub(r'[^\w\s]', ' ', norm)
+            norm = re.sub(r'\s+', ' ', norm).strip()
+            self._ocr_norm_cache[key] = norm
+            if lookup_key:
+                self._ocr_norm_by_lookup[lookup_key] = norm
+        print(f"[OCR] Built lookup index: {len(self._ocr_lookup)} entries, pre-normalized: {len(self._ocr_norm_cache)}")
 
         # Build file existence cache for all keyframe dirs
         self._frame_path_cache = {}  # (video_folder, frame_id) -> absolute_path
