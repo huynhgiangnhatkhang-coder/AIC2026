@@ -8,7 +8,7 @@ echo "Đang khởi động Frontend (Vite) trên cổng 5173..."
 cd AIChallenge2026-master
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-npm run dev &
+npm run dev -- --host &
 FRONTEND_PID=$!
 
 cd ..

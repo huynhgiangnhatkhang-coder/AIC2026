@@ -182,6 +182,7 @@ function mapAnswersToFrames(answers: AnswerItem[]): FrameResult[] {
       fps: null,
       snippet: a.answer ?? a.formatted,
       frame_id: frameId,
+      keyframe_id: a.keyframe_id,
       answer: a.answer,
     };
   });

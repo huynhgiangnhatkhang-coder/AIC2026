@@ -45,6 +45,7 @@ export interface AnswerItem {
   video_id: string;
   frame_id: number | null;
   frame_ids: number[] | null;
+  keyframe_id?: number | null;
   answer: string | null;
   score: number;
   formatted: string;
@@ -72,6 +73,8 @@ export interface FrameResult {
   snippet: string | null;
   /** Raw keyframe id — needed to build `video_id, frame_id` submission lines. */
   frame_id: number | null;
+  /** Keyframe index to display in UI. */
+  keyframe_id?: number | null;
   /** VQA answer text (Q&A mode) or null for plain KIS. */
   answer: string | null;
 }

@@ -15,7 +15,9 @@ const COLLAPSED_TAGS = 4;
 
 export function FrameCard({ frame, index, queryId, queryType }: FrameCardProps) {
   const video = frame.video_name ?? "unknown";
-  const tags = (frame.snippet ?? "").split(",").map((t) => t.trim()).filter(Boolean);
+  const displayId = frame.keyframe_id ?? frame.frame_id ?? "";
+  const tags = [video, String(displayId)];
+  if (frame.answer) tags.push(frame.answer);
   const scorePct = Math.round(((frame.score + 1) / 2) * 100);
 
   const { isSelected, toggle } = useSelection();

@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import yaml
+import threading
 
 from src.retrieval import CLIPRetriever, BM25Retriever, HybridRetriever
 from src.query import FlorenceKISSearcher, QASearcher, TRAKESearcher
@@ -45,6 +46,7 @@ _hybrid_retriever = None
 _kis_searcher = None
 _qa_searcher = None
 _trake_searcher = None
+_gpu_lock = threading.Lock()
 
 _BACKEND = cfg.get("retrieval_backend", "milvus").lower()
 
@@ -212,6 +214,7 @@ class AnswerItem(BaseModel):
     video_id: str
     frame_id: Optional[int] = None
     frame_ids: Optional[List[int]] = None
+    keyframe_id: Optional[int] = None
     answer: Optional[str] = None
     score: float
     formatted: str  # chuỗi nộp bài
@@ -277,12 +280,13 @@ def search_kis(req: KISRequest):
     try:
         searcher = get_kis_searcher()
         print(f"DEBUG: /search/kis called with req.top_k = {req.top_k}")
-        results = searcher.search(
-            raw_query=req.query,
-            object_hints=req.object_hints,
-            search_mode=req.search_mode,
-            top_k=req.top_k
-        )
+        with _gpu_lock:
+            results = searcher.search(
+                raw_query=req.query,
+                object_hints=req.object_hints,
+                search_mode=req.search_mode,
+                top_k=req.top_k
+            )
         print(f"DEBUG: searcher.search returned {len(results)} results")
 
         answers = []
@@ -293,6 +297,7 @@ def search_kis(req: KISRequest):
                 rank=r.get("rank", i),
                 video_id=r["video_id"],
                 frame_id=fid,
+                keyframe_id=idx,
                 score=r.get("score", 0.0),
                 formatted=f"{r['video_id']}, {fid}",
                 image_url=f"/frames/{r['video_id']}/{idx}"
@@ -316,11 +321,12 @@ def search_qa(req: QARequest):
     """
     try:
         searcher = get_qa_searcher()
-        results = searcher.search(
-            query=req.retrieval_query,
-            question=req.question,
-            use_vqa=req.use_vqa
-        )
+        with _gpu_lock:
+            results = searcher.search(
+                query=req.retrieval_query,
+                question=req.question,
+                use_vqa=req.use_vqa
+            )
 
         answers = []
         for r in results[:req.top_k]:
@@ -330,6 +336,7 @@ def search_qa(req: QARequest):
                 rank=r["rank"],
                 video_id=r["video_id"],
                 frame_id=fid,
+                keyframe_id=idx,
                 answer=r.get("answer", ""),
                 score=r.get("score", 0.0),
                 formatted=f"{r['video_id']}, {fid}, {r.get('answer', '')}",
@@ -359,7 +366,8 @@ def search_trake(req: TRAKERequest):
 
     try:
         searcher = get_trake_searcher()
-        results = searcher.search(req.events)
+        with _gpu_lock:
+            results = searcher.search(req.events)
 
         answers = []
         for r in results[:req.top_k]:
@@ -374,6 +382,7 @@ def search_trake(req: TRAKERequest):
                 rank=r["rank"],
                 video_id=r["video_id"],
                 frame_ids=true_fids,
+                keyframe_id=cur,
                 score=r.get("total_score", 0.0),
                 formatted=f"{r['video_id']}, " + ", ".join(str(f) for f in true_fids),
                 image_url=(f"/frames/{r['video_id']}/{cur}" if cur is not None else None)
